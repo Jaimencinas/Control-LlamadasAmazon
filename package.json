@@ -1,0 +1,16 @@
+{
+  "name": "control-entregas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Panel de Baterías Volta: clientes a llamar por entregas de Amazon y control de llamadas en Ringover.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

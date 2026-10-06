@@ -1,0 +1,8 @@
+node_modules/
+.netlify/
+.env
+*.pdf
+*.xls
+*.xlsx
+*.txt
+!README.txt

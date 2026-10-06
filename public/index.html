@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<style>html,body{margin:0;padding:0}</style>
+</head>
+<body>
+<title>Control de entregas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one working column. Live query box first, optional file drop zones under it, read the verdict in the summary strip, work the call list below. */
+:root{
+  --bg:#F1F4F3; --surface:#FFFFFF; --sunk:#E7ECEA; --ink:#13201E; --ink2:#44534F; --muted:#6C7B77; --line:#D5DDDA;
+  --accent:#0B5D6B; --accent-ink:#FFFFFF; --accent-soft:#DCEBEE;
+  --good:#0ca30c; --warn:#fab219; --crit:#d03b3b;
+  --good-soft:#E3F3E1; --warn-soft:#FCF0D2; --crit-soft:#F9E1DF;
+  --display:"Archivo","Arial Narrow",Arial,sans-serif;
+  --body:"IBM Plex Sans","Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --r:6px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0F1615; --surface:#172120; --sunk:#111A19; --ink:#E7EEEC; --ink2:#B5C3BF; --muted:#8A9A96; --line:#2B3936;
+  --accent:#62C2D2; --accent-ink:#05262C; --accent-soft:#16363C;
+  --good-soft:#163318; --warn-soft:#3B2F0E; --crit-soft:#421C1B; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0F1615; --surface:#172120; --sunk:#111A19; --ink:#E7EEEC; --ink2:#B5C3BF; --muted:#8A9A96; --line:#2B3936;
+  --accent:#62C2D2; --accent-ink:#05262C; --accent-soft:#16363C;
+  --good-soft:#163318; --warn-soft:#3B2F0E; --crit-soft:#421C1B; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.45}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:24px 56px;display:flex;flex-direction:column;gap:20px}
+h1{font-family:var(--display);font-weight:700;font-size:26px;line-height:1.1;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-family:var(--display);font-weight:600;font-size:16px;margin:0}
+p{margin:0}
+.lede{color:var(--ink2);max-width:68ch}
+.parts{display:flex;flex-wrap:wrap;gap:4px;background:var(--sunk);padding:3px;border-radius:var(--r);align-self:flex-start}
+.parts button{border:0;background:none;padding:8px 16px;border-radius:4px;cursor:pointer;color:var(--ink2);font-weight:600;font-size:14px}
+.parts button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.part{display:flex;flex-direction:column;gap:20px;min-width:0}
+.part[hidden]{display:none}
+.mono{font-family:var(--mono);font-size:12.5px}
+.muted{color:var(--muted)}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+header.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between}
+header.top > div{min-width:0;display:flex;flex-direction:column;gap:6px}
+
+/* loaders */
+.load{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.zone{background:var(--surface);border:1.5px dashed var(--line);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0;cursor:pointer;transition:border-color .12s,background .12s}
+.zone:hover,.zone.over{border-color:var(--accent);background:var(--accent-soft)}
+.zone input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.zone .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.zone .t{font-weight:600;font-size:15px}
+.zone .h{color:var(--ink2);font-size:13px}
+.zone .add{align-self:flex-start;border:1px solid var(--accent);color:var(--accent);border-radius:4px;padding:5px 12px;font-weight:600;font-size:13px;margin-top:2px}
+.zone:hover .add{background:var(--accent);color:var(--accent-ink)}
+.zone .tot{font-size:12.5px;color:var(--ink2);font-weight:600}
+.files{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+.zcol{display:flex;flex-direction:column;gap:10px;min-width:0}
+.direct{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.direct .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.direct .t{font-weight:600;font-size:15px}
+.direct .h{color:var(--ink2);font-size:13px}
+.direct .row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.lnk{border:0;background:none;color:var(--accent);text-decoration:underline;cursor:pointer;padding:2px 0;font-size:13px}
+.lnk:disabled{opacity:.5;cursor:default}
+details.hist{margin-top:3px;font-size:12px;color:var(--ink2)}
+details.hist summary{cursor:pointer;color:var(--accent)}
+details.hist ol{margin:4px 0 0;padding-left:18px}
+.files li{display:flex;gap:8px;align-items:baseline;justify-content:space-between;background:var(--sunk);border-radius:4px;padding:5px 8px;font-size:12.5px;min-width:0}
+.files li span{min-width:0;overflow-wrap:anywhere}
+.files button{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 2px;font-size:14px;line-height:1}
+.files button:hover{color:var(--crit)}
+
+.opts{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;color:var(--ink2);font-size:13px}
+.opts label{display:flex;gap:8px;align-items:center}
+.opts select,.opts input[type=time]{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:4px 6px}
+
+/* notices */
+.notes{display:flex;flex-direction:column;gap:8px}
+.note{border-radius:var(--r);padding:10px 12px;display:flex;gap:10px;align-items:flex-start;background:var(--surface);border:1px solid var(--line)}
+.note b{font-weight:600}
+.note .ic{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:var(--muted)}
+.note.warn{background:var(--warn-soft);border-color:transparent}.note.warn .ic{background:var(--warn);color:#2b1f00}
+.note.crit{background:var(--crit-soft);border-color:transparent}.note.crit .ic{background:var(--crit)}
+.note.demo{background:var(--accent-soft);border-color:transparent}.note.demo .ic{background:var(--accent);color:var(--accent-ink)}
+
+/* summary */
+.sum{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;display:flex;flex-direction:column;gap:16px}
+.sum-top{display:flex;flex-wrap:wrap;gap:16px 40px;align-items:flex-end}
+.hero{display:flex;flex-direction:column;gap:2px}
+.hero .v{font-size:56px;font-weight:600;line-height:1;letter-spacing:-.02em}
+.hero .l{font-weight:600}
+.stats{display:flex;flex-wrap:wrap;gap:12px 34px}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat .v{font-size:24px;font-weight:600;line-height:1.1}
+.stat .l{color:var(--ink2);font-size:13px;display:flex;gap:6px;align-items:center}
+.dot{width:10px;height:10px;border-radius:2px;flex:none;display:inline-block}
+.dot.g{background:var(--good)}.dot.a{background:var(--accent)}.dot.c{background:var(--crit)}.dot.n{background:var(--muted)}
+.bar{display:flex;gap:2px;height:14px;border-radius:4px;overflow:hidden;background:var(--sunk)}
+.bar i{display:block;min-width:2px}
+.bar .g{background:var(--good)}.bar .a{background:var(--accent)}.bar .c{background:var(--crit)}
+.sum .cap{color:var(--ink2);font-size:13px}
+
+/* toolbar + tabs */
+.tools{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:space-between}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;background:var(--sunk);padding:3px;border-radius:var(--r)}
+.tabs button{border:0;background:none;padding:6px 12px;border-radius:4px;cursor:pointer;color:var(--ink2);font-weight:500}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.tabs .n{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:4px}
+.right{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.search{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:6px 10px;min-width:0;width:220px;max-width:100%}
+.btn{border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:4px;padding:7px 14px;font-weight:600;cursor:pointer}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{background:none;color:var(--accent)}
+.msg{font-size:13px;color:var(--ink2)}
+
+/* tables */
+.tw{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:920px;font-size:13px}
+th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:600;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0;background:var(--surface)}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+tr.done td{opacity:.5}
+td .sub{color:var(--muted);font-size:12px;display:block;overflow-wrap:anywhere}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+td .nw{white-space:nowrap}
+.pill{display:inline-flex;gap:6px;align-items:center;border-radius:999px;padding:2px 9px 2px 7px;font-size:12px;font-weight:500;white-space:nowrap;background:var(--sunk)}
+.pill.c{background:var(--crit-soft)}.pill.g{background:var(--good-soft)}.pill.a{background:var(--accent-soft)}.pill.w{background:var(--warn-soft)}
+.pill b{font-weight:700}
+.tel{font-family:var(--mono);font-size:13px;white-space:nowrap}
+.cp{border:1px solid var(--line);background:none;border-radius:4px;padding:1px 6px;font-size:11px;color:var(--ink2);cursor:pointer;margin-left:6px}
+.cp:hover{border-color:var(--accent);color:var(--accent)}
+.empty{padding:28px 16px;text-align:center;color:var(--ink2)}
+input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+footer{color:var(--muted);font-size:12.5px;max-width:80ch}
+.acceso{position:fixed;inset:0;z-index:50;background:var(--bg);display:grid;place-items:center;padding:16px}
+.acceso form{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:24px;display:flex;flex-direction:column;gap:12px;width:100%;max-width:340px}
+.acceso input{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:9px 10px;font:inherit}
+.acceso .btn{align-self:flex-start}
+
+@media (max-width:720px){ .load{grid-template-columns:1fr} .hero .v{font-size:44px} h1{font-size:22px} .search{width:100%} }
+@media (prefers-reduced-motion:reduce){ *{transition:none!important} }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Control de entregas</h1>
+    </div>
+  </header>
+  <nav class="parts" role="tablist" aria-label="Partes del panel">
+    <button type="button" role="tab" data-part="llamadas" aria-selected="true">Llamadas Clientes</button>
+    <button type="button" role="tab" data-part="control" aria-selected="false">Control de Llamadas</button>
+  </nav>
+
+  <div class="part" id="pLlamadas">
+  <p class="lede">Consulta en directo Amazon y Correos Express, o carga sus ficheros. Todo envío que después de la hora de corte no esté en reparto o entregado se marca para llamar al cliente.</p>
+
+  <section class="direct" aria-label="Consulta en directo">
+    <span class="k">En directo · sin descargar ficheros</span>
+    <span class="t">Amazon y Correos Express en directo</span>
+    <span class="h">Trae ahora mismo los pedidos de Amazon de los últimos 8 días y el estado en Correos Express de los envíos de los días anteriores. Usa el escenario «LLAMADAS AMAZON» de Make y tarda alrededor de un minuto.</span>
+    <div class="row">
+      <button class="btn" id="btnCex" type="button">Consultar Amazon y Correos Express</button>
+      <button class="lnk" id="btnCexUlt" type="button">Cargar la última consulta guardada</button>
+    </div>
+    <p class="msg" id="cexMsg" hidden></p>
+  </section>
+
+  <section class="load" aria-label="Carga de ficheros">
+    <label class="zone" id="zoneA" for="fileA">
+      <span class="k">Ficheros 1 · opcional</span>
+      <span class="t">O carga los pedidos de Amazon en .txt</span>
+      <span class="h">Los informes de pedidos en .txt tal como se descargan de Seller Central, sin abrirlos en Excel. Admite varios: si Amazon te da un fichero por día, carga uno por cada día que revisas. Puedes seleccionarlos todos a la vez o ir añadiéndolos.</span>
+      <input type="file" id="fileA" accept=".txt,.tsv,.csv,text/plain" multiple>
+      <ul class="files" id="listA"></ul>
+      <span class="tot" id="totA" hidden></span>
+      <span class="add" id="addA">Elegir ficheros</span>
+    </label>
+    <div class="zcol">
+      <label class="zone" id="zoneC" for="fileC">
+        <span class="k">Ficheros 2 · opcional</span>
+        <span class="t">O carga el listado de Correos Express en .xls</span>
+        <span class="h">El listado de seguimiento descargado del portal después de la hora de corte. Si hay varias cargas, para cada envío vale el estado de la última.</span>
+        <input type="file" id="fileC" accept=".xls,.xlsx,application/vnd.ms-excel" multiple>
+        <ul class="files" id="listC"></ul>
+        <span class="tot" id="totC" hidden></span>
+        <span class="add" id="addC">Elegir ficheros</span>
+      </label>
+    </div>
+  </section>
+
+  <section class="opts" aria-label="Reglas">
+    <label for="optDays">Días anteriores a revisar
+      <select id="optDays"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select>
+    </label>
+    <label for="optCut">Hora de corte <input type="time" id="optCut" value="10:30"></label>
+    <label for="optAmz"><input type="checkbox" id="optAmz" checked> Solo pedidos de Amazon</label>
+    <label for="optDev"><input type="checkbox" id="optDev" checked> Llamar también por devoluciones</label>
+    <label for="optSin"><input type="checkbox" id="optSin"> Añadir al PDF los pedidos de Amazon sin envío</label>
+  </section>
+
+  <section class="notes" id="notes" aria-live="polite"></section>
+
+  <section class="sum" id="sum"></section>
+
+  <section>
+    <div class="tools">
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div class="right">
+        <input class="search" id="q" type="search" placeholder="Buscar cliente, pedido, población…" aria-label="Buscar">
+        <button class="btn" id="btnPdf" type="button">Generar PDF</button>
+      </div>
+    </div>
+    <p class="msg" id="pdfMsg" style="margin-top:8px" hidden></p>
+    <p class="msg" id="marcaMsg" style="margin-top:8px" role="status" hidden></p>
+    <div class="tw" id="table" style="margin-top:12px"></div>
+  </section>
+  </div>
+
+  <div class="part" id="pControl" hidden>
+  <p class="lede">Sube el PDF de llamadas que diste al equipo y comprueba en Ringover a quién se ha llamado de verdad, quién llamó y si el cliente contestó.</p>
+  <section class="load" aria-label="Lista y llamadas">
+    <label class="zone" id="zoneP" for="fileP">
+      <span class="k">Paso 1</span>
+      <span class="t">PDF de llamadas</span>
+      <span class="h">Los PDF «Llamadas Entregas Amazon» generados en este panel. Puedes subir varios a la vez o ir añadiéndolos, por ejemplo el de ayer y el de hoy: un cliente que sale en varios cuenta una sola vez. Los generados antes del 6 de octubre de 2026 no sirven: no llevan la lista dentro.</span>
+      <input type="file" id="fileP" accept=".pdf,application/pdf" multiple>
+      <ul class="files" id="listP"></ul>
+      <span class="add" id="addP">Elegir PDF</span>
+    </label>
+    <div class="direct">
+      <span class="k">Paso 2</span>
+      <span class="t">Llamadas de Ringover</span>
+      <span class="h" id="rgPeriodo"></span>
+      <div class="row">
+        <button class="btn" id="btnRg" type="button">Comprobar en Ringover</button>
+        <button class="lnk" id="btnRgUlt" type="button">Cargar la última consulta guardada</button>
+      </div>
+      <p class="msg" id="rgMsg" role="status" hidden></p>
+    </div>
+  </section>
+  <button class="lnk" id="btnListaActual" type="button" style="align-self:flex-start">Usar la lista que hay ahora en «Llamadas Clientes», sin subir PDF</button>
+
+  <section class="notes" id="cNotes" aria-live="polite"></section>
+
+  <section class="sum" id="cSum"></section>
+
+  <section>
+    <div class="tools">
+      <div class="tabs" role="tablist" id="cTabs"></div>
+      <div class="right">
+        <input class="search" id="cQ" type="search" placeholder="Buscar cliente, teléfono, pedido…" aria-label="Buscar en el control">
+        <button class="btn" id="btnCPdf" type="button">Generar PDF de control</button>
+      </div>
+    </div>
+    <p class="msg" id="cPdfMsg" style="margin-top:8px" role="status" hidden></p>
+    <div class="tw" id="cTable" style="margin-top:12px"></div>
+  </section>
+  </div>
+
+  <footer>
+    Los ficheros se leen en tu navegador y no se guardan ni se envían a ningún sitio. La consulta en directo pasa por tu cuenta de Make. El control de llamadas compara la lista del PDF con las llamadas de Ringover por número de teléfono: solo ve lo que se llama desde Ringover. Las marcas de «llamado» se guardan con esta página: quien la abra ve las mismas y un cliente ya llamado no vuelve a salir en la lista ni en el PDF. En los días anteriores no cuenta el domingo: con 4 días, un lunes se revisa desde el miércoles.
+  </footer>
+</div>
+
+<script src="pdf-lib.min.js"></script>
+<script>
+"use strict";
+/* ============ fuera de Claude (web propia, p. ej. Netlify): las mismas funciones pasan por /api ============ */
+// Dentro de Claude existe window.claude y este bloque no hace nada. Fuera, se sustituye por un adaptador que habla con
+// la función del servidor (netlify/functions/api.mjs), protegida con la contraseña del panel.
+if (!(window.claude && window.claude.use)) (() => {
+  const LS = 'ce_clave'; let clave = ''; try { clave = localStorage.getItem(LS) || ''; } catch (e) {}
+  const pedir = async (ruta, cuerpo, k) => fetch('/api/' + ruta, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ clave: k }, cuerpo)) });
+  let pidiendo = null;
+  function pedirClave() {
+    if (pidiendo) return pidiendo;
+    pidiendo = new Promise(res => {
+      const d = document.createElement('div'); d.className = 'acceso';
+      d.innerHTML = '<form><h1>Control de entregas</h1><p class="lede">Escribe la contraseña del panel.</p><input type="password" autocomplete="current-password" aria-label="Contraseña" required><p class="msg" role="alert" hidden></p><button class="btn" type="submit">Entrar</button></form>';
+      const f = d.querySelector('form'), inp = d.querySelector('input'), msg = d.querySelector('.msg'), btn = d.querySelector('button');
+      const say = t => { msg.hidden = !t; msg.textContent = t || ''; };
+      f.addEventListener('submit', async ev => {
+        ev.preventDefault(); btn.disabled = true; say('');
+        try {
+          const r = await pedir('sesion', {}, inp.value);
+          if (r.status === 401) { say('Contraseña incorrecta.'); inp.select(); return; }
+          if (!r.ok) { let j = null; try { j = await r.json(); } catch (e) {} say((j && j.message) || 'El servidor del panel no responde (error ' + r.status + ').'); return; }
+          clave = inp.value; try { localStorage.setItem(LS, clave); } catch (e) {}
+          d.remove(); pidiendo = null; res();
+        } catch (e) { say('No hay conexión con el servidor del panel.'); }
+        finally { btn.disabled = false; }
+      });
+      document.body.appendChild(d); inp.focus();
+    });
+    return pidiendo;
+  }
+  async function api(ruta, cuerpo) {
+    if (!clave) await pedirClave();
+    let r; try { r = await pedir(ruta, cuerpo || {}, clave); } catch (e) { throw { code: 'server_unavailable', message: 'No hay conexión con el servidor del panel.' }; }
+    if (r.status === 401) { clave = ''; try { localStorage.removeItem(LS); } catch (e) {} await pedirClave(); return api(ruta, cuerpo); }
+    let j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw { code: (j && j.code) || 'upstream_error', message: (j && j.message) || 'El servidor del panel ha respondido con un error (' + r.status + ').' };
+    return j || {};
+  }
+  // Make: mismos nombres de herramienta que usa la página dentro de Claude
+  const mcp = { callTool: async (server, tool, input) => ({ payload: (await api('make', { tool, input })).payload }) };
+  // Marcas de «llamado» e historial de listas: se guardan en el servidor y se refrescan cada minuto
+  const subs = {}; let cache = null, huella = {};
+  const emitir = todo => Object.keys(subs).forEach(c => {
+    const h = JSON.stringify((cache && cache[c]) || {}); if (!todo && huella[c] === h) return; huella[c] = h;
+    const docs = Object.keys((cache && cache[c]) || {}).sort().map(id => ({ id, exists: true, data: () => cache[c][id] }));
+    subs[c].forEach(fn => { try { fn({ docs }); } catch (e) {} });
+  });
+  const refrescar = async () => { cache = (await api('datos', { op: 'todo' })).datos || {}; emitir(); };
+  let reloj = null;
+  const arrancar = () => { if (reloj) return; refrescar().catch(() => {}); reloj = setInterval(() => { if (!document.hidden) refrescar().catch(() => {}); }, 60000); document.addEventListener('visibilitychange', () => { if (!document.hidden) refrescar().catch(() => {}); }); };
+  const fallo = e => { throw { code: e && e.code === 'solo_lectura' ? 'invalid_argument' : 'unavailable', message: (e && e.message) || '' }; };
+  const db = {
+    collection: c => ({ onSnapshot: next => { (subs[c] = subs[c] || []).push(next); if (cache) { huella[c] = null; Promise.resolve().then(() => emitir()); } arrancar(); return () => {}; } }),
+    doc: ruta => { const [col, id] = ruta.split('/'); const escribir = async (op, body) => { try { cache = (await api('datos', { op, col, id, body })).datos || cache; } catch (e) { fallo(e); } emitir(); };
+      return { get: async () => { if (!cache) { try { await refrescar(); } catch (e) { fallo(e); } } const b = cache[col] && cache[col][id]; return { id, exists: !!b, data: () => b }; }, set: b => escribir('set', b), update: b => escribir('merge', b), delete: () => escribir('borrar') }; }
+  };
+  // Descargas: enlace normal del navegador
+  const downloads = { save: async ({ filename, data }) => { const u = URL.createObjectURL(data instanceof Blob ? data : new Blob([data])), a = document.createElement('a'); a.href = u; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 30000); return { status: 'saved' }; } };
+  window.claude = { use: async n => n === 'mcp' ? mcp : n === 'db' ? db : n === 'downloads' ? downloads : null };
+  window.__web = { salir: () => { try { localStorage.removeItem(LS); } catch (e) {} location.reload(); } };
+  const pie = document.querySelector('footer'); if (pie) { const b = document.createElement('button'); b.type = 'button'; b.className = 'lnk'; b.textContent = 'Cerrar sesión'; b.style.marginLeft = '8px'; b.addEventListener('click', window.__web.salir); pie.appendChild(b); }
+})();
+/* ============ utilidades ============ */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const dm = d => d ? pad(d.getDate()) + '/' + pad(d.getMonth() + 1) : '';
+const dmy = d => d ? dm(d) + '/' + d.getFullYear() : '';
+const hm = d => d ? pad(d.getHours()) + ':' + pad(d.getMinutes()) : '';
+const _ta = document.createElement('textarea');
+const decEnt = s => { s = String(s ?? ''); if (s.indexOf('&') < 0) return s; _ta.innerHTML = s; return _ta.value; };
+function rangoV(M) { const v = M.ventana.map(dm); return v.length <= 2 ? listaY(v) : v[0] + ' al ' + v[v.length - 1]; }
+function listaY(a) { return a.length <= 1 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' y ' + a[a.length - 1]; }
+
+function parseFecha(s) { // dd/mm/yy, dd/mm/yyyy [hh:mm[:ss]], dd-mm-yyyy
+  s = String(s ?? '').trim();
+  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) { let y = +m[3]; if (y < 100) y += 2000; return new Date(y, +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)); }
+  if (/^\d{5}(\.\d+)?$/.test(s)) { const n = parseFloat(s); const d = new Date(Math.round((n - 25569) * 86400000)); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes()); }
+  return null;
+}
+function telLimpio(s) {
+  s = String(s ?? '').trim(); let d = s.replace(/\D/g, '');
+  if (d.length < 9 || /^0+$/.test(d)) return '';
+  if (d.length === 11 && d.startsWith('34')) d = d.slice(2);
+  if (d.length === 13 && d.startsWith('0034')) d = d.slice(4);
+  return d.length === 9 ? d.slice(0, 3) + ' ' + d.slice(3, 6) + ' ' + d.slice(6) : s;
+}
+
+/* ============ lector de .xls (formato Excel 97-2003) ============ */
+function cfbWorkbook(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const sig = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+  for (let i = 0; i < 8; i++) if (u8[i] !== sig[i]) throw new Error('no-cfb');
+  const ss = 1 << dv.getUint16(30, true), mss = 1 << dv.getUint16(32, true);
+  const nFat = dv.getUint32(44, true), dirStart = dv.getUint32(48, true), cutoff = dv.getUint32(56, true);
+  const miniFatStart = dv.getUint32(60, true), difatStart = dv.getUint32(68, true), nDifat = dv.getUint32(72, true);
+  const END = 0xFFFFFFFA, off = n => (n + 1) * ss;
+  const difat = [];
+  for (let i = 0; i < 109; i++) { const v = dv.getUint32(76 + i * 4, true); if (v < END) difat.push(v); }
+  let d = difatStart, g = 0;
+  while (d < END && g++ <= nDifat) { const o = off(d); for (let i = 0; i < ss / 4 - 1; i++) { const v = dv.getUint32(o + i * 4, true); if (v < END) difat.push(v); } d = dv.getUint32(o + ss - 4, true); }
+  const fat = [];
+  for (const s of difat.slice(0, nFat)) { const o = off(s); for (let i = 0; i < ss / 4; i++) fat.push(o + i * 4 + 4 <= u8.length ? dv.getUint32(o + i * 4, true) : 0xFFFFFFFE); }
+  const read = (start, size) => {
+    const secs = []; let s = start, n = 0;
+    while (s < END && n++ <= fat.length) { secs.push(s); s = fat[s]; }
+    const out = new Uint8Array(secs.length * ss);
+    secs.forEach((x, i) => out.set(u8.subarray(off(x), Math.min(off(x) + ss, u8.length)), i * ss));
+    return size != null ? out.subarray(0, size) : out;
+  };
+  const dir = read(dirStart), ddv = new DataView(dir.buffer, dir.byteOffset, dir.byteLength);
+  let root = null, wb = null;
+  for (let o = 0; o + 128 <= dir.length; o += 128) {
+    const nl = ddv.getUint16(o + 64, true); if (!nl) continue;
+    let name = ''; for (let i = 0; i < nl - 2; i += 2) name += String.fromCharCode(ddv.getUint16(o + i, true));
+    const type = dir[o + 66], start = ddv.getUint32(o + 116, true), size = ddv.getUint32(o + 120, true);
+    if (type === 5) root = { start, size };
+    if (type === 2 && (name === 'Workbook' || (name === 'Book' && !wb))) wb = { start, size };
+  }
+  if (!wb) throw new Error('no-workbook');
+  if (wb.size >= cutoff || !root) return read(wb.start, wb.size);
+  const mini = read(root.start, root.size), mf = read(miniFatStart), mdv = new DataView(mf.buffer, mf.byteOffset, mf.byteLength);
+  const out = new Uint8Array(wb.size); let s = wb.start, pos = 0, n = 0;
+  while (s < END && pos < wb.size && n++ < 1e6) { out.set(mini.subarray(s * mss, s * mss + Math.min(mss, wb.size - pos)), pos); pos += mss; s = mdv.getUint32(s * 4, true); }
+  return out;
+}
+function biffRows(st) {
+  const dv = new DataView(st.buffer, st.byteOffset, st.byteLength);
+  const sst = [], sheets = []; let cur = null, pos = 0, lastF = null;
+  const rk = v => { let n; if (v & 2) n = (v | 0) >> 2; else { const b = new DataView(new ArrayBuffer(8)); b.setUint32(4, v & 0xFFFFFFFC, true); n = b.getFloat64(0, true); } return (v & 1) ? n / 100 : n; };
+  const numS = n => Number.isInteger(n) ? String(n) : String(+n.toFixed(6));
+  const put = (r, c, v) => { if (!cur) return; (cur[r] || (cur[r] = []))[c] = v; };
+  const str = (o) => { const cch = dv.getUint16(o, true), hi = st[o + 2] & 1; let s = ''; for (let k = 0; k < cch; k++) s += String.fromCharCode(hi ? dv.getUint16(o + 3 + k * 2, true) : st[o + 3 + k]); return s; };
+  while (pos + 4 <= st.length) {
+    const t = dv.getUint16(pos, true), len = dv.getUint16(pos + 2, true), o = pos + 4; pos = o + len;
+    if (pos > st.length) break;
+    if (t === 0x0809) { cur = dv.getUint16(o + 2, true) === 0x0010 ? (sheets.push([]), sheets[sheets.length - 1]) : null; }
+    else if (t === 0x00FC) {
+      const ch = [{ o, end: o + len }];
+      while (pos + 4 <= st.length && dv.getUint16(pos, true) === 0x003C) { const l = dv.getUint16(pos + 2, true); ch.push({ o: pos + 4, end: pos + 4 + l }); pos += 4 + l; }
+      const total = dv.getUint32(o + 4, true); let ci = 0, p = o + 8;
+      const need = () => { while (ci < ch.length && p >= ch[ci].end) { ci++; if (ci < ch.length) p = ch[ci].o; } return ci < ch.length; };
+      for (let i = 0; i < total; i++) {
+        if (!need()) break;
+        const cch = dv.getUint16(p, true); p += 2; const fl = st[p++]; let hi = fl & 1;
+        let cRun = 0, cbExt = 0;
+        if (fl & 8) { cRun = dv.getUint16(p, true); p += 2; }
+        if (fl & 4) { cbExt = dv.getUint32(p, true); p += 4; }
+        let s = '', left = cch;
+        while (left > 0) {
+          if (p >= ch[ci].end) { ci++; if (ci >= ch.length) break; p = ch[ci].o; hi = st[p++] & 1; }
+          const avail = ch[ci].end - p, n = Math.min(left, hi ? Math.floor(avail / 2) : avail);
+          if (n === 0) { p = ch[ci].end; continue; }
+          if (hi) for (let k = 0; k < n; k++) { s += String.fromCharCode(dv.getUint16(p, true)); p += 2; }
+          else for (let k = 0; k < n; k++) s += String.fromCharCode(st[p++]);
+          left -= n;
+        }
+        let skip = cRun * 4 + cbExt;
+        while (skip > 0) { if (!need()) break; const n = Math.min(skip, ch[ci].end - p); p += n; skip -= n; }
+        sst.push(s);
+      }
+    }
+    else if (t === 0x00FD) put(dv.getUint16(o, true), dv.getUint16(o + 2, true), sst[dv.getUint32(o + 6, true)] ?? '');
+    else if (t === 0x0204 || t === 0x00D6) put(dv.getUint16(o, true), dv.getUint16(o + 2, true), str(o + 6));
+    else if (t === 0x0203) put(dv.getUint16(o, true), dv.getUint16(o + 2, true), numS(dv.getFloat64(o + 6, true)));
+    else if (t === 0x027E) put(dv.getUint16(o, true), dv.getUint16(o + 2, true), numS(rk(dv.getUint32(o + 6, true))));
+    else if (t === 0x00BD) { const r = dv.getUint16(o, true), c0 = dv.getUint16(o + 2, true), n = (len - 6) / 6; for (let i = 0; i < n; i++) put(r, c0 + i, numS(rk(dv.getUint32(o + 4 + i * 6 + 2, true)))); }
+    else if (t === 0x0006) { const r = dv.getUint16(o, true), c = dv.getUint16(o + 2, true); if (dv.getUint16(o + 12, true) === 0xFFFF) lastF = [r, c]; else put(r, c, numS(dv.getFloat64(o + 6, true))); }
+    else if (t === 0x0207 && lastF) { put(lastF[0], lastF[1], str(o)); lastF = null; }
+  }
+  const sh = sheets.find(s => s.length) || [];
+  const out = [];
+  for (let r = 0; r < sh.length; r++) { const row = sh[r] || []; const a = []; for (let c = 0; c < row.length; c++) a.push(row[c] == null ? '' : String(row[c])); out.push(a); }
+  return out;
+}
+let _xlsxLib = null;
+function cargarSheetJS() { // solo si el lector propio no puede con el fichero
+  return _xlsxLib || (_xlsxLib = new Promise((ok, ko) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = () => ok(window.XLSX); s.onerror = () => ko(new Error('sheetjs')); document.head.appendChild(s); }));
+}
+async function filasExcel(u8) {
+  try { return biffRows(cfbWorkbook(u8)); }
+  catch (e) {
+    const X = await cargarSheetJS();
+    const wb = X.read(u8, { type: 'array' });
+    return X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' }).map(r => r.map(v => String(v ?? '')));
+  }
+}
+
+/* ============ lectura de los dos ficheros ============ */
+function leerCorreos(rows, nombre) {
+  let hi = -1, impreso = null;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const j = rows[i].join(' ');
+    const m = j.match(/impresi[oó]n:\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\s+\d{1,2}:\d{2}(?::\d{2})?)/i);
+    if (m) impreso = parseFecha(m[1]);
+    const n = rows[i].map(norm);
+    if (n.includes('estado') && n.some(x => x.startsWith('env'))) { hi = i; break; }
+  }
+  if (hi < 0) throw new Error('No reconozco este fichero como listado de Correos Express (falta la fila de cabeceras con «Envío» y «Estado»).');
+  const h = rows[hi].map(norm), ix = (re, from = 0) => h.findIndex((x, i) => i >= from && re.test(x));
+  const c = { envio: ix(/^envio$/), ref: ix(/^referencia/), fecha: ix(/^fecha/), prod: ix(/^producto/), dest: ix(/^destinatario/), dir: ix(/^direccion/), pob: ix(/^poblacion/), cp: ix(/^c\.?\s?postal/), bultos: ix(/^bultos/), kilos: ix(/^kilos/), estado: ix(/^estado/), recep: ix(/^receptor/), obs: h.lastIndexOf('observaciones') };
+  c.fest = ix(/^fecha/, c.estado + 1);
+  const envs = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i], v = k => (c[k] >= 0 ? String(r[c[k]] ?? '') : '').trim();
+    const envio = v('envio');
+    if (!envio || /^total registros/i.test(envio)) continue;
+    envs.push({ envio, ref: v('ref'), fecha: parseFecha(v('fecha')), prod: v('prod'), dest: v('dest'), dir: v('dir'), pob: v('pob'), cp: v('cp').padStart(5, '0'), bultos: v('bultos'), kilos: v('kilos'), estado: v('estado'), fest: parseFecha(v('fest')), recep: v('recep'), obs: v('obs') });
+  }
+  if (!envs.length) throw new Error('El listado de Correos Express no contiene envíos.');
+  let desde = null, hasta = null; envs.forEach(e => { if (e.fecha) { if (!desde || e.fecha < desde) desde = e.fecha; if (!hasta || e.fecha > hasta) hasta = e.fecha; } });
+  return { nombre, impreso, envs, desde, hasta };
+}
+function leerAmazon(text, nombre) {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim().length);
+  const h = (lines[0] || '').split('\t').map(x => x.trim().toLowerCase()), ix = n => h.indexOf(n);
+  const general = ix('order-id') < 0 && ix('amazon-order-id') >= 0, cId = general ? 'amazon-order-id' : 'order-id';
+  if (ix(cId) < 0 || ix('sku') < 0) throw new Error('No reconozco este fichero como informe de pedidos de Amazon. Sube el .txt original, sin abrirlo ni guardarlo desde Excel.');
+  const pedidos = new Map();
+  for (let i = 1; i < lines.length; i++) {
+    const f = lines[i].split('\t'), v = n => { const k = ix(n); return k >= 0 ? decEnt((f[k] ?? '').trim()) : ''; };
+    const id = v(cId); if (!id) continue;
+    if (general && /^amazon$/i.test(v('fulfillment-channel'))) continue; // lo envía Amazon desde su almacén: no pasa por Correos Express
+    let p = pedidos.get(id);
+    if (!p) {
+      const t1 = telLimpio(v('ship-phone-number')), t2 = telLimpio(v('buyer-phone-number'));
+      p = { id, cliente: v('recipient-name') || v('buyer-name'), tel: t1 || t2, tel2: (t1 && t2 && t1 !== t2) ? t2 : '', fecha: new Date(v('purchase-date')), dir: [v('ship-address-1'), v('ship-address-2')].filter(Boolean).join(', '), ciudad: v('ship-city'), cp: v('ship-postal-code').padStart(5, '0'), instr: v('delivery-instructions').replace(/^"+|"+$/g, '').trim(), items: [], vistos: new Set(), est: v('order-status'), general };
+      if (isNaN(p.fecha)) p.fecha = null;
+      pedidos.set(id, p);
+    }
+    const li = v('order-item-id') || (v('sku') + '#' + p.items.length);
+    if (!p.vistos.has(li)) { p.vistos.add(li); p.items.push({ sku: v('sku'), nombre: v('product-name'), uds: parseInt(v('quantity-purchased') || v('quantity'), 10) || 1 }); }
+  }
+  if (!pedidos.size) throw new Error('El informe de Amazon no contiene pedidos.');
+  let desde = null, hasta = null; pedidos.forEach(p => { if (p.fecha) { if (!desde || p.fecha < desde) desde = p.fecha; if (!hasta || p.fecha > hasta) hasta = p.fecha; } });
+  return { nombre, pedidos, desde, hasta, general };
+}
+function textoDe(u8) { try { return new TextDecoder('utf-8', { fatal: true }).decode(u8); } catch (e) { return new TextDecoder('windows-1252').decode(u8); } }
+async function leerFichero(file) {
+  const u8 = new Uint8Array(await file.arrayBuffer());
+  const esExcel = (u8[0] === 0xD0 && u8[1] === 0xCF) || (u8[0] === 0x50 && u8[1] === 0x4B);
+  if (esExcel) return { tipo: 'correos', dato: leerCorreos(await filasExcel(u8), file.name) };
+  return { tipo: 'amazon', dato: leerAmazon(textoDe(u8), file.name) };
+}
+
+/* ============ estado y reglas ============ */
+// llamados: nº de envío → { t: cuándo se marcó (ms), dia: documento del almacén donde está guardada la marca }
+const S = { amazon: [], correos: [], demo: true, tab: 'llamar', q: '', llamados: new Map(), demoLlamados: new Map(), errores: [] };
+try { const v = JSON.parse(localStorage.getItem('ce_llamados') || '[]'); (Array.isArray(v) ? v.map(x => [x, 0]) : Object.entries(v)).forEach(([k, t]) => S.llamados.set(k, { t: +t || 0, dia: '' })); } catch (e) {}
+function guardarLocal() { try { localStorage.setItem('ce_llamados', JSON.stringify(Object.fromEntries([...S.llamados].slice(-3000).map(([k, v]) => [k, v.t])))); } catch (e) {} }
+const marcas = () => S.demo ? S.demoLlamados : S.llamados;
+// Historial de listas: cada vez que se guarda el PDF se apunta qué envíos llevaba y con qué estado, para señalar al día siguiente los repetidos.
+const HIST = { local: {}, db: {}, porEnvio: new Map() };
+try { const v = JSON.parse(localStorage.getItem('ce_listas') || '{}'); if (v && typeof v === 'object') HIST.local = v; } catch (e) {}
+function histRehacer() {
+  const m = new Map();
+  [HIST.local, HIST.db].forEach(src => Object.keys(src).forEach(dia => { const e = src[dia] || {}; Object.keys(e).forEach(k => { const v = e[k] || {}, a = m.get(k) || m.set(k, new Map()).get(k); a.set(dia, { dia, t: +v.t || 0, es: String(v.es || '') }); }); }));
+  HIST.porEnvio = new Map([...m].map(([k, d]) => [k, [...d.values()].sort((a, b) => a.dia < b.dia ? -1 : 1)]));
+}
+histRehacer();
+const diaTxt = d => d.slice(8, 10) + '/' + d.slice(5, 7);
+
+function canalDe(ref) {
+  if (/^\d{3}-\d{7}-\d{7}$/.test(ref)) return 'Amazon';
+  const u = ref.toUpperCase();
+  if (u.startsWith('WEB')) return 'Web'; if (u.startsWith('TEMU')) return 'Temu'; if (u.startsWith('MANO')) return 'ManoMano'; if (u.startsWith('AUTODOC')) return 'Autodoc';
+  return 'Otro';
+}
+function calcular() {
+  const dias = +$('optDays').value || 4, corte = $('optCut').value || '10:30', conDev = $('optDev').checked, soloAmz = $('optAmz').checked;
+  const amazon = S.demo ? DEMO.amazon : S.amazon, correos = S.demo ? DEMO.correos : S.correos;
+  const pedidos = new Map(); amazon.forEach(a => a.pedidos.forEach((p, id) => {
+    const q = pedidos.get(id); if (!q) { pedidos.set(id, p); return; }
+    const r = Object.assign({}, q); let c = false;
+    if (!r.tel && p.tel) { r.tel = p.tel; r.tel2 = p.tel2; c = true; }
+    ['cliente', 'dir', 'instr', 'ciudad', 'est'].forEach(k => { if (!r[k] && p[k]) { r[k] = p[k]; c = true; } });
+    if (q.general && !p.general) { r.general = false; c = true; }
+    if (c) pedidos.set(id, r);
+  }));
+  // Para cada envío manda el último fichero de Correos que se ha cargado: los ficheros se recorren en orden de carga y el posterior pisa al anterior.
+  const porEnvio = new Map(); let informe = null, sinHora = false, masNuevo = null;
+  correos.forEach((c, i) => {
+    const ultimo = i === correos.length - 1;
+    let t = c.impreso; if (!t) { if (ultimo) sinHora = true; t = c.envs.reduce((m, e) => e.fest && (!m || e.fest > m) ? e.fest : m, null); }
+    if (ultimo) informe = t; else if (t && (!masNuevo || t > masNuevo)) masNuevo = t;
+    c.envs.forEach(e => porEnvio.set(e.envio, Object.assign({}, e, { _t: t, _ult: ultimo })));
+  });
+  const M = { dias, corte, informe, sinHora, hayAmazon: amazon.length > 0, hayCorreos: correos.length > 0, envios: [], llamar: [], sin: [], n: { rev: 0, ent: 0, rep: 0, no: 0, dev: 0, hoy: 0, viejos: 0, viejosPend: 0, otros: 0 }, ventana: [] };
+  M.desorden = informe && masNuevo && masNuevo > informe ? masNuevo : null;
+  M.hechos = [];
+  if (!informe) { M.sin = [...pedidos.values()]; return M; }
+  const hoy = new Date(informe.getFullYear(), informe.getMonth(), informe.getDate());
+  const d = new Date(hoy); let n = 0;
+  while (n < dias) { d.setDate(d.getDate() - 1); if (d.getDay() !== 0) { n++; M.ventana.unshift(new Date(d)); } /* el domingo no cuenta: un lunes se revisa desde el miércoles */ }
+  const desde = M.ventana[0];
+  const [ch, cm] = corte.split(':').map(Number);
+  M.provisional = !sinHora && (informe.getHours() * 60 + informe.getMinutes() < ch * 60 + cm);
+  const refs = new Set();
+  porEnvio.forEach(e => {
+    refs.add(e.ref);
+    if (soloAmz && canalDe(e.ref) !== 'Amazon') { M.n.otros++; return; }
+    const up = e.estado.toUpperCase(), dev = /^DEVOLUC/i.test(e.prod), p = pedidos.get(e.ref);
+    const sit = dev ? 'dev' : up.startsWith('ENTREGADO') ? 'ent' : up.startsWith('EN REPARTO') ? 'rep' : 'no';
+    const per = !e.fecha ? 'ventana' : e.fecha >= hoy ? 'hoy' : e.fecha < desde ? 'viejo' : 'ventana';
+    // En una devolución el destinatario es Baterías Volta: el cliente es el remitente (e.cli), que solo viene en la consulta en directo.
+    const c = dev ? (e.cli || {}) : { nombre: e.dest, tel: e.tel, dir: e.dir, pob: e.pob, cp: e.cp };
+    const x = { envio: e.envio, ref: e.ref, canal: canalDe(e.ref), fecha: e.fecha, estado: e.estado, fest: e.fest, sit, per, dev,
+      cliente: (dev ? (p && p.cliente) || c.nombre : c.nombre || (p && p.cliente)) || '', tel: (p && p.tel) || c.tel || '', tel2: p && p.tel ? (p.tel2 || (c.tel && c.tel !== p.tel ? c.tel : '')) : '', enAmazon: !!p, directo: !!e.directo, hist: e.hist || [],
+      pob: (dev ? (p && p.ciudad) || c.pob : c.pob || (p && p.ciudad)) || '', cp: (dev ? (p && p.cp) || c.cp : c.cp || (p && p.cp)) || '', dir: (dev ? (p && p.dir) || c.dir : c.dir || (p && p.dir)) || '',
+      sku: p ? p.items.map(i => (i.uds > 1 ? i.uds + ' × ' : '') + i.sku).join(' + ') : '', prod: p ? p.items.map(i => i.nombre).join(' + ') : '', instr: p ? p.instr : '', obs: e.obs, recep: e.recep, serv: e.prod };
+    x.enUltimo = e._ult; x.listado = e._t;
+    const antes = (HIST.porEnvio.get(e.envio) || []).filter(h => h.dia < ymd(hoy));
+    if (antes.length && !S.demo) { const u = antes[antes.length - 1]; x.rep = { veces: antes.length, dia: u.dia, primero: antes[0].dia, mismo: u.es === e.estado }; }
+    x.diasSin = e.fest ? Math.round((hoy - new Date(e.fest.getFullYear(), e.fest.getMonth(), e.fest.getDate())) / 86400000) : null;
+    x.llamar = per === 'ventana' && (sit === 'no' || (sit === 'dev' && conDev));
+    M.envios.push(x);
+    if (per === 'hoy') M.n.hoy++;
+    else if (per === 'viejo') { M.n.viejos++; if (sit === 'no' || sit === 'dev') M.n.viejosPend++; }
+    else { M.n.rev++; M.n[sit]++; }
+    if (x.llamar) M.llamar.push(x);
+  });
+  // Una devolución cuyo envío original ya está en la lista no se repite: se anota en la fila del original, para no llamar dos veces al mismo cliente.
+  const orig = M.llamar.filter(x => !x.dev), porNum = new Map(orig.map(x => [x.envio, x])), porRef = new Map(orig.map(x => [x.ref, x]));
+  M.dupDev = 0;
+  M.llamar = M.llamar.filter(x => {
+    if (!x.dev) return true;
+    const m = /(\d{16})/.exec(x.obs || ''), o = (m && porNum.get(m[1])) || (x.ref && porRef.get(x.ref));
+    if (!o) return true;
+    o.devol = { envio: x.envio, estado: x.estado, fest: x.fest }; x.llamar = false; x.dupDe = o.envio; M.dupDev++; return false;
+  });
+  const ord = { no: 0, dev: 1 };
+  M.llamar.sort((a, b) => (a.fecha - b.fecha) || (ord[a.sit] - ord[b.sit]) || a.estado.localeCompare(b.estado) || a.cliente.localeCompare(b.cliente));
+  M.envios.sort((a, b) => (b.llamar - a.llamar) || (a.fecha - b.fecha) || a.estado.localeCompare(b.estado));
+  const sinTodos = [...pedidos.values()].filter(p => !refs.has(p.id) && !/^cancel/i.test(p.est || '')).sort((a, b) => (a.fecha || 0) - (b.fecha || 0));
+  const minEnv = M.envios.reduce((m, x) => x.fecha && (!m || x.fecha < m) ? x.fecha : m, null), lim = minEnv ? new Date(minEnv.getTime() - 86400000) : null;
+  M.sin = sinTodos.filter(p => !lim || !p.fecha || p.fecha >= lim); M.sinAntiguos = sinTodos.length - M.sin.length;
+  // Los ya llamados salen de la lista (y del PDF) y pasan a su propia pestaña.
+  const mk = marcas(); M.hechos = [];
+  M.llamar = M.llamar.filter(x => { const m = mk.get(x.envio); if (!m) return true; x.llamado = m.t || 1; M.hechos.push(x); return false; });
+  M.hechos.sort((a, b) => b.llamado - a.llamado);
+  M.sinTel = M.llamar.filter(x => !x.tel).length;
+  M.nRep = M.llamar.filter(x => x.rep).length;
+  return M;
+}
+const SIT = { no: ['c', '!', 'No llega hoy'], dev: ['w', '↩', 'Devolución'], ent: ['g', '✓', 'Entregado'], rep: ['a', '→', 'En reparto'] };
+function etiquetaSit(x) { if (x.per === 'hoy') return ['', '·', 'Sale hoy']; if (x.per === 'viejo' && (x.sit === 'no' || x.sit === 'dev')) return ['', '·', 'Anterior, pendiente']; return SIT[x.sit]; }
+
+/* ============ pintado ============ */
+let M = null;
+function pintar() {
+  M = calcular();
+  // ficheros
+  const li = (arr, tipo, txt) => arr.map((f, i) => `<li><span><b>${esc(f.nombre)}</b> · ${txt(f)}${tipo === 'correos' && arr.length > 1 && i === arr.length - 1 ? ' · <b>último cargado: manda su estado</b>' : ''}</span><button type="button" data-rm="${tipo}:${i}" aria-label="Quitar ${esc(f.nombre)}">×</button></li>`).join('');
+  const rg = f => !f.desde ? '' : ' · ' + (dm(f.desde) === dm(f.hasta) ? 'del ' + dm(f.desde) : 'del ' + dm(f.desde) + ' al ' + dm(f.hasta));
+  $('listA').innerHTML = li(S.amazon, 'amazon', f => f.pedidos.size + (f.pedidos.size === 1 ? ' pedido' : ' pedidos') + rg(f) + (f.directo && f.impreso ? ' · consultado el ' + dm(f.impreso) + ' a las ' + hm(f.impreso) : ''));
+  $('listC').innerHTML = li(S.correos, 'correos', f => f.envs.length + (f.envs.length === 1 ? ' envío' : ' envíos') + rg(f) + (f.impreso ? (f.directo ? ' · consultado el ' : ' · sacado el ') + dm(f.impreso) + ' a las ' + hm(f.impreso) : ''));
+  const totFich = (id, arr, n, palabra) => { const el = $(id); el.hidden = arr.length < 2; if (arr.length > 1) { const d = arr.reduce((m, f) => f.desde && (!m || f.desde < m) ? f.desde : m, null), h = arr.reduce((m, f) => f.hasta && (!m || f.hasta > m) ? f.hasta : m, null); el.textContent = `${arr.length} ficheros · ${n} ${palabra} distintos` + (d ? ` · del ${dm(d)} al ${dm(h)}` : ''); } };
+  totFich('totA', S.amazon, new Set(S.amazon.flatMap(f => [...f.pedidos.keys()])).size, 'pedidos');
+  totFich('totC', S.correos, new Set(S.correos.flatMap(f => f.envs.map(e => e.envio))).size, 'envíos');
+  $('addA').textContent = S.amazon.length ? '+ Añadir otro fichero' : 'Elegir ficheros';
+  $('addC').textContent = S.correos.length ? '+ Añadir otro fichero' : 'Elegir ficheros';
+  // avisos
+  const N = [];
+  if (S.demo) N.push(['demo', 'i', '<b>Datos de ejemplo.</b> Los clientes y teléfonos son inventados. Pulsa «Consultar Amazon y Correos Express» o carga tus ficheros para ver los tuyos.']);
+  S.errores.forEach(e => N.push(['crit', '!', esc(e)]));
+  if (!S.demo && M.hayAmazon && !M.hayCorreos) N.push(['warn', '!', 'Falta el listado de Correos Express. Sin él no se puede saber qué envíos llegan.']);
+  if (!S.demo && M.hayCorreos && !M.hayAmazon) N.push(['warn', '!', S.correos.some(c => c.directo) ? 'Faltan los pedidos de Amazon. El cliente, el teléfono y la dirección salen de Correos Express, pero no se ve el producto.' : 'Falta el informe de Amazon. La lista sale igualmente, pero sin teléfonos ni producto.']);
+  if (M.informe) {
+    if (M.provisional) N.push(['warn', '!', `<b>Resultado provisional.</b> El listado se sacó a las ${hm(M.informe)}, antes de las ${esc(M.corte)}. Vuelve a descargarlo de Correos Express después de esa hora para el resultado definitivo.`]);
+    if (M.desorden) N.push(['warn', '!', `El último listado que has cargado se sacó el ${dm(M.informe)} a las ${hm(M.informe)}, antes que otro que ya estaba cargado (${dm(M.desorden)} a las ${hm(M.desorden)}). Se usa el último que has cargado; si no es lo que quieres, quita el antiguo o vuelve a añadir el más reciente.`]);
+    if (M.sinHora) N.push(['warn', '!', 'El listado no indica a qué hora se sacó, así que no puedo comprobar la hora de corte.']);
+    if (M.n.rev === 0 && M.hayCorreos) N.push(['warn', '!', `El listado no trae envíos del ${rangoV(M)}. Descárgalo de Correos Express incluyendo esas fechas.`]);
+    if (M.n.viejosPend) N.push(['', 'i', `Hay ${M.n.viejosPend} envíos anteriores al ${dm(M.ventana[0])} que siguen sin entregar y quedan fuera del periodo. Sube «Días anteriores a revisar» para verlos.`]);
+  }
+  $('notes').innerHTML = N.map(([c, i, t]) => `<div class="note ${c}"><span class="ic" aria-hidden="true">${i}</span><p>${t}</p></div>`).join('');
+  // resumen
+  const n = M.n, tot = n.rev || 1, call = M.llamar.length;
+  $('sum').innerHTML = M.informe ? `
+    <div class="sum-top">
+      <div class="hero"><span class="v">${call}</span><span class="l">${call === 1 ? 'cliente' : 'clientes'} a llamar${M.hechos.length ? `<span style="display:block;font-weight:400;font-size:13px;color:var(--ink2)">${M.hechos.length} ya ${M.hechos.length === 1 ? 'llamado' : 'llamados'}</span>` : ''}</span></div>
+      <div class="stats">
+        <div class="stat"><span class="v">${n.rev}</span><span class="l"><span class="dot n"></span>Envíos revisados</span></div>
+        <div class="stat"><span class="v">${n.ent}</span><span class="l"><span class="dot g"></span>✓ Entregados</span></div>
+        <div class="stat"><span class="v">${n.rep}</span><span class="l"><span class="dot a"></span>→ En reparto</span></div>
+        <div class="stat"><span class="v">${n.no}</span><span class="l"><span class="dot c"></span>! No llegan hoy</span></div>
+        <div class="stat"><span class="v">${n.dev}</span><span class="l"><span class="dot c"></span>↩ Devoluciones</span></div>
+      </div>
+    </div>
+    <div class="bar" role="img" aria-label="Entregados ${n.ent}, en reparto ${n.rep}, no llegan o devueltos ${n.no + n.dev}, de ${n.rev} envíos">
+      <i class="g" style="flex:${n.ent}" title="Entregados: ${n.ent} (${Math.round(n.ent / tot * 100)} %)"${n.ent ? '' : ' hidden'}></i><i class="a" style="flex:${n.rep}" title="En reparto: ${n.rep} (${Math.round(n.rep / tot * 100)} %)"${n.rep ? '' : ' hidden'}></i><i class="c" style="flex:${n.no + n.dev}" title="No llegan hoy o devueltos: ${n.no + n.dev} (${Math.round((n.no + n.dev) / tot * 100)} %)"${n.no + n.dev ? '' : ' hidden'}></i>
+    </div>
+    <p class="cap">Listado de Correos Express del ${dmy(M.informe)} a las ${hm(M.informe)}. Se revisan los envíos del ${rangoV(M)}${n.hoy ? `; ${n.hoy === 1 ? '1 envío que sale hoy no cuenta' : n.hoy + ' envíos que salen hoy no cuentan'} todavía` : ''}.${n.otros ? ` No se incluyen ${n.otros} envíos de otros canales (web, Temu, ManoMano, Autodoc).` : ''}${M.dupDev ? ` ${M.dupDev === 1 ? '1 devolución no se repite' : M.dupDev + ' devoluciones no se repiten'} en la lista porque su envío original ya está en ella.` : ''}${M.nRep ? ` ${M.nRep === 1 ? '1 cliente ya salió' : M.nRep + ' clientes ya salieron'} en una lista anterior y ${M.nRep === 1 ? 'va marcado' : 'van marcados'} como «Repetido».` : ''}${M.sinTel ? ` ${M.sinTel === 1 ? '1 de los clientes a llamar no tiene' : M.sinTel + ' de los clientes a llamar no tienen'} teléfono.` : ''}</p>`
+    : `<p class="cap">Consulta en directo o carga el listado de Correos Express para ver el resultado.</p>`;
+  // pestañas
+  const T = [['llamar', 'A llamar', M.llamar.length], ['hechos', 'Ya llamados', M.hechos.length], ['todos', 'Todos los envíos', M.envios.length], ['sin', 'Amazon sin envío', M.sin.length]];
+  $('tabs').innerHTML = T.map(([k, t, c]) => `<button type="button" role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${t}<span class="n">${c}</span></button>`).join('');
+  $('btnPdf').disabled = !M.informe;
+  pintarTabla();
+}
+function motivoSinTel(x) { return x.directo ? 'Correos Express no lo tiene' : x.canal !== 'Amazon' ? 'pedido de ' + x.canal : x.enAmazon ? 'Amazon ya no lo facilita' : 'no está en el informe de Amazon'; }
+function telHtml(x) {
+  if (!x.tel) return '<span class="muted">sin teléfono</span>' + (x.canal ? `<span class="sub">${esc(motivoSinTel(x))}</span>` : '');
+  return `<span class="tel">${esc(x.tel)}</span><button type="button" class="cp" data-copy="${esc(x.tel)}">copiar</button>` + (x.tel2 ? `<span class="sub tel">${esc(x.tel2)}</span>` : '');
+}
+function pintarTabla() {
+  const q = norm(S.q), ok = x => !q || norm(Object.values(x).filter(v => typeof v === 'string').join(' ')).includes(q);
+  let h = '';
+  if (S.tab === 'sin') {
+    const rows = M.sin.map(p => ({ id: p.id, est: /^pending/i.test(p.est || '') ? 'Pendiente en Amazon' : '', gen: !!p.general, cliente: p.cliente, tel: p.tel, tel2: p.tel2, ciudad: p.ciudad, cp: p.cp, sku: p.items.map(i => (i.uds > 1 ? i.uds + ' × ' : '') + i.sku).join(' + '), prod: p.items.map(i => i.nombre).join(' + '), f: p.fecha ? dm(p.fecha) + ' ' + hm(p.fecha) : '' })).filter(ok);
+    h = rows.length ? `<table><thead><tr><th>Pedido</th><th>Fecha pedido</th><th>Cliente</th><th>Teléfono</th><th>Destino</th><th>Producto</th></tr></thead><tbody>` + rows.map(x => `<tr><td><span class="mono nw">${esc(x.id)}</span>${x.est ? `<span class="sub">${x.est}</span>` : ''}</td><td class="num">${esc(x.f)}</td><td>${x.cliente ? esc(x.cliente) : x.gen ? '<span class="muted">sin envío no hay datos del cliente</span>' : ''}</td><td>${x.gen && !x.tel ? '<span class="muted">—</span>' : telHtml(x)}</td><td>${esc(x.ciudad)}<span class="sub">${esc(x.cp)}</span></td><td><span class="mono">${esc(x.sku)}</span><span class="sub">${esc(x.prod.slice(0, 90))}</span></td></tr>`).join('') + '</tbody></table>'
+      : `<div class="empty">${M.sin.length ? 'Ningún pedido coincide con la búsqueda.' : 'Todos los pedidos de Amazon cargados tienen envío en el listado.'}</div>`;
+    if (rows.length) h = `<p class="msg" style="padding:10px 12px;border-bottom:1px solid var(--line)">Pedidos de Amazon que no aparecen en los envíos de Correos Express cargados. Puede ser que aún no hayan salido, que vayan por otro transportista o que su día de envío no esté en la consulta. No se incluyen los cancelados.${M.sinAntiguos ? ' No se muestran ' + M.sinAntiguos + ' pedidos anteriores a los envíos del listado.' : ''}</p>` + h;
+  } else {
+    const hechos = S.tab === 'hechos', src = (S.tab === 'llamar' ? M.llamar : hechos ? M.hechos : M.envios).filter(ok), call = S.tab === 'llamar' || hechos;
+    h = src.length ? `<table><thead><tr>${call ? '<th>Llamado</th>' : ''}<th>Situación</th><th>Cliente</th><th>Teléfono</th><th>Pedido</th><th>Enviado</th><th>Destino</th><th>Producto</th></tr></thead><tbody>` + src.map(x => {
+      const [c, ic, t] = etiquetaSit(x), done = !!x.llamado;
+      return `<tr>${call ? `<td><input type="checkbox" data-done="${esc(x.envio)}" data-ref="${esc(x.ref)}" ${done ? 'checked' : ''} aria-label="${done ? 'Quitar la marca de llamado' : 'Marcar como llamado'}">${done && x.llamado > 1 ? `<span class="sub nw">${dm(new Date(x.llamado))} ${hm(new Date(x.llamado))}</span>` : ''}</td>` : ''}
+        <td><span class="pill ${c}"><b aria-hidden="true">${ic}</b>${t}</span>${x.rep && x.llamar ? `<span class="pill w" style="margin-top:4px"><b aria-hidden="true">↻</b>Repetido · ya salió el ${diaTxt(x.rep.dia)}</span><span class="sub">${x.rep.veces > 1 ? 'Lleva ' + (x.rep.veces + 1) + ' días en la lista, desde el ' + diaTxt(x.rep.primero) + '. ' : ''}${x.rep.mismo ? 'Mismo estado que entonces.' : 'El estado ha cambiado desde entonces.'}</span>` : ''}<span class="sub">${esc(x.estado)}${x.fest ? ' · ' + dm(x.fest) + ' ' + hm(x.fest) : ''}</span>${x.diasSin >= 1 && x.sit !== 'ent' ? `<span class="sub"><b>Sin cambios desde hace ${x.diasSin === 1 ? '1 día' : x.diasSin + ' días'}</b></span>` : ''}${x.devol ? `<span class="sub">Devolución ${esc(x.devol.envio)}: ${esc(x.devol.estado)}${x.devol.fest ? ' · ' + dm(x.devol.fest) + ' ' + hm(x.devol.fest) : ''}</span>` : ''}${x.dupDe ? `<span class="sub">No se repite en «A llamar»: ya está su envío original ${esc(x.dupDe)}</span>` : ''}${!x.enUltimo ? `<span class="sub">Estado del listado del ${dm(x.listado)} ${hm(x.listado)}: no aparece en el último</span>` : ''}${x.hist.length > 1 ? `<details class="hist"><summary>Historial (${x.hist.length} pasos)</summary><ol>${x.hist.map(h => `<li>${h.f ? dm(h.f) + ' ' + hm(h.f) + ' · ' : ''}${esc(h.t)}${h.del ? ' <span class="muted">(' + esc(h.del) + ')</span>' : ''}</li>`).join('')}</ol></details>` : ''}</td>
+        <td>${x.cliente ? esc(x.cliente) : '<span class="muted">cliente no identificado</span>'}${x.instr ? `<span class="sub">Nota del cliente: ${esc(x.instr)}</span>` : ''}</td>
+        <td>${telHtml(x)}</td>
+        <td><span class="mono nw">${esc(x.ref)}</span><span class="sub nw">${esc(x.canal)} · envío ${esc(x.envio)}</span></td>
+        <td class="num">${dm(x.fecha)}</td>
+        <td>${esc(x.pob)}<span class="sub">${esc(x.cp)}${x.dir ? ' · ' + esc(x.dir) : ''}</span></td>
+        <td><span class="mono">${esc(x.sku)}</span><span class="sub">${esc(x.prod.slice(0, 80))}</span></td></tr>`;
+    }).join('') + '</tbody></table>'
+      : `<div class="empty">${!M.informe ? 'Aquí aparecerá la lista cuando consultes en directo o cargues el listado de Correos Express.' : hechos ? (M.hechos.length ? 'Nada coincide con la búsqueda.' : 'Aquí aparecen los clientes que marques como llamados. Desmarca uno para devolverlo a la lista.') : (call && !M.llamar.length) ? (M.hechos.length ? 'Ya has llamado a todos los clientes de la lista.' : 'No hay nadie a quien llamar: todos los envíos revisados están entregados o en reparto.') : 'Nada coincide con la búsqueda.'}</div>`;
+  }
+  $('table').innerHTML = h;
+}
+
+/* ============ PDF ============ */
+function winAnsi(s) {
+  return String(s ?? '').replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, '-').replace(/\u2026/g, '...').replace(/[\x00-\x1F\x7F]/g, ' ')
+    .replace(/[^\x20-\x7E\xA0-\xFF\u20AC]/g, ch => { const d = ch.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); return /^[\x20-\x7E]+$/.test(d) ? d : '?'; });
+}
+async function hacerPdf(titulo, pie, dibujar) {
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+  const doc = await PDFDocument.create(), F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);
+  const W = 595.28, H = 841.89, MX = 34, MY = 34, /* A4 vertical */ ink = rgb(.07, .12, .12), gris = rgb(.42, .47, .46), linea = rgb(.82, .85, .84), cab = rgb(.92, .94, .93), rojo = rgb(.82, .23, .23);
+  let page, y;
+  const nueva = () => { page = doc.addPage([W, H]); y = H - MY; };
+  const txt = (s, x, yy, size = 8, font = F, color = ink) => page.drawText(winAnsi(s), { x, y: yy, size, font, color });
+  const wrap = (s, font, size, w, max = 3) => {
+    const out = []; let cur = '';
+    const push = () => { out.push(cur); cur = ''; };
+    for (let word of winAnsi(s).split(/\s+/).filter(Boolean)) {
+      while (font.widthOfTextAtSize(word, size) > w) { let k = word.length; while (k > 1 && font.widthOfTextAtSize((cur ? cur + ' ' : '') + word.slice(0, k), size) > w) k--; if (cur && k <= 1 && font.widthOfTextAtSize(cur + ' ' + word.slice(0, 1), size) > w) { push(); continue; } cur = (cur ? cur + ' ' : '') + word.slice(0, k); word = word.slice(k); push(); }
+      if (!word) continue;
+      const t = cur ? cur + ' ' + word : word;
+      if (font.widthOfTextAtSize(t, size) > w) { push(); cur = word; } else cur = t;
+    }
+    if (cur) out.push(cur);
+    if (out.length > max) { out.length = max; let l = out[max - 1]; while (l.length > 1 && font.widthOfTextAtSize(l + '...', size) > w) l = l.slice(0, -1); out[max - 1] = l + '...'; }
+    return out.length ? out : [''];
+  };
+  const tabla = (cols, filas, vacio) => {
+    const sz = 8, lh = 10, padY = 4, total = cols.reduce((a, c) => a + c.w, 0);
+    const cabecera = () => { page.drawRectangle({ x: MX, y: y - 16, width: total, height: 16, color: cab }); let x = MX; cols.forEach(c => { txt(c.t, x + 4, y - 11, 7.5, B, gris); x += c.w; }); y -= 16; };
+    cabecera();
+    if (!filas.length) { txt(vacio, MX + 4, y - 14, 9, F, gris); y -= 24; return; }
+    filas.forEach(f => {
+      const cel = cols.map(c => c.box ? [] : (Array.isArray(f[c.k]) ? f[c.k] : [f[c.k]]).flatMap((s, i) => { const o = s && typeof s === 'object' ? s : { t: s }, fnt = o.b || (i === 0 && c.b) ? B : F, col = o.col || (i === 0 ? ink : gris); return wrap(o.t, fnt, sz, c.w - 8, c.max || 3).map(l => [l, fnt, col]); }));
+      const lines = Math.max(1, ...cel.map(c => c.length)), h = lines * lh + padY * 2;
+      if (y - h < MY + 18) { nueva(); cabecera(); }
+      if (f.marca) page.drawRectangle({ x: MX - 7, y: y - h + 1, width: 4, height: h - 2, color: rojo });
+      let x = MX;
+      cols.forEach((c, i) => {
+        if (c.box) page.drawRectangle({ x: x + 6, y: y - padY - 10, width: 10, height: 10, borderColor: gris, borderWidth: .8 });
+        else cel[i].forEach((l, j) => txt(l[0], x + 4, y - padY - 7 - j * lh, sz, l[1], l[2]));
+        x += c.w;
+      });
+      y -= h; page.drawLine({ start: { x: MX, y }, end: { x: MX + total, y }, thickness: .5, color: linea });
+    });
+  };
+  const AN = W - MX * 2; // ancho útil: 527 pt
+  const par = (s, size, font, color, gap = 5) => { wrap(s, font, size, AN, 4).forEach(l => { txt(l, MX, y - size, size, font, color); y -= size + 3; }); y -= gap; };
+  const skuDe = it => it.map(i => (i.uds > 1 ? i.uds + ' × ' : '') + i.sku).join(' + ');
+  nueva();
+  doc.setTitle(titulo);
+  dibujar({ doc, F, B, ink, gris, rojo, MX, MY, W, H, AN, txt, par, tabla, nueva, skuDe, get y() { return y; }, set y(v) { y = v; } });
+  const pages = doc.getPages();
+  pages.forEach((p, i) => { page = p; txt(pie, MX, 18, 7.5, F, gris); const s = `Página ${i + 1} de ${pages.length}`; txt(s, W - MX - F.widthOfTextAtSize(s, 7.5), 18, 7.5, F, gris); });
+  return await doc.save();
+}
+// La lista de clientes viaja dentro del propio PDF (campo propio de sus metadatos) para poder leerla después en «Control de Llamadas».
+const CLAVE_PDF = 'VoltaLlamadas';
+function listaAlPdf(doc, M) {
+  const { PDFName, PDFHexString } = window.PDFLib;
+  const datos = { v: 1, gen: Date.now(), informe: M.informe ? M.informe.getTime() : 0, demo: S.demo ? 1 : 0, filas: M.llamar.map(x => ({ e: x.envio, r: x.ref, c: x.cliente, t: x.tel, t2: x.tel2 || '', s: x.sit, es: x.estado, p: x.pob })) };
+  doc.getInfoDict().set(PDFName.of(CLAVE_PDF), PDFHexString.fromText(JSON.stringify(datos)));
+}
+async function listaDelPdf(u8, nombre) {
+  const { PDFDocument, PDFName } = window.PDFLib;
+  let doc; try { doc = await PDFDocument.load(u8, { updateMetadata: false }); } catch (e) { throw new Error('no se puede abrir: no parece un PDF.'); }
+  let d = null; try { const v = doc.getInfoDict().lookup(PDFName.of(CLAVE_PDF)); if (v && v.decodeText) d = JSON.parse(v.decodeText()); } catch (e) {}
+  if (!d || !Array.isArray(d.filas)) throw new Error('este PDF no lleva la lista dentro. Tiene que ser un «Llamadas Entregas Amazon» generado en este panel a partir del 6 de octubre de 2026; genera uno nuevo en «Llamadas Clientes».');
+  return { nombre, gen: new Date(+d.gen || Date.now()), demo: !!d.demo, filas: d.filas.map(f => ({ envio: String(f.e || ''), ref: String(f.r || ''), cliente: String(f.c || ''), tel: String(f.t || ''), tel2: String(f.t2 || ''), sit: f.s === 'dev' ? 'dev' : 'no', estado: String(f.es || ''), pob: String(f.p || '') })) };
+}
+async function construirPdf(M) {
+  return hacerPdf('Llamadas Entregas Amazon', `Llamadas Entregas Amazon · regla: lo que a las ${M.corte} no está en reparto o entregado no llega ese día`, c => {
+    const { doc, F, B, ink, gris, rojo, MX, MY, txt, par, tabla, nueva, skuDe } = c;
+  txt('Llamadas Entregas Amazon', MX, c.y - 16, 20, B); c.y -= 28;
+  par(`Correos Express · listado del ${dmy(M.informe)} a las ${hm(M.informe)} · envíos del ${rangoV(M)}`, 10, F, gris);
+  const n = M.n;
+  par(`Revisados ${n.rev}  ·  Entregados ${n.ent}  ·  En reparto ${n.rep}  ·  No llegan hoy ${n.no}  ·  Devoluciones ${n.dev}  ·  A llamar ${M.llamar.length}`, 9.5, B, ink);
+  if (M.provisional) par(`RESULTADO PROVISIONAL: el listado se sacó antes de las ${M.corte}. Vuelve a descargarlo después de esa hora.`, 9, B, rojo, 3);
+  if (n.otros) par(`Solo pedidos de Amazon: no se incluyen ${n.otros} envíos de otros canales.`, 9, F, gris, 3);
+  if (M.hechos.length) par(`No se incluyen ${M.hechos.length === 1 ? '1 cliente ya llamado' : M.hechos.length + ' clientes ya llamados'}.`, 9, F, gris, 3);
+  if (M.nRep) par(`${M.nRep === 1 ? '1 cliente REPETIDO: ya salió' : M.nRep + ' clientes REPETIDOS: ya salieron'} en una lista anterior. ${M.nRep === 1 ? 'Va señalado' : 'Van señalados'} con una barra roja a la izquierda.`, 9, B, rojo, 3);
+  if (M.dupDev) par(`${M.dupDev === 1 ? '1 devolución no se repite' : M.dupDev + ' devoluciones no se repiten'}: su envío original ya está en la lista.`, 9, F, gris, 3);
+  if (S.demo) par('DATOS DE EJEMPLO: clientes y teléfonos inventados.', 9, B, rojo, 3);
+  c.y -= 4;
+  tabla([{ t: 'SITUACIÓN', k: 'a', w: 95, b: 1, max: 5 }, { t: 'CLIENTE', k: 'b', w: 125, b: 1 }, { t: 'TELÉFONO', k: 'c', w: 66, b: 1 }, { t: 'PEDIDO', k: 'd', w: 118 }, { t: 'DESTINO', k: 'f', w: 92 }, { t: 'HECHO', box: 1, w: 31 }],
+    M.llamar.map(x => ({ marca: !!x.rep, a: [x.sit === 'dev' ? 'Devolución al almacén' : 'No llega hoy'].concat(x.rep ? [{ t: 'REPETIDO: ya salió el ' + diaTxt(x.rep.dia) + (x.rep.veces > 1 ? ' (' + (x.rep.veces + 1) + ' días en la lista)' : ''), b: 1, col: rojo }, x.rep.mismo ? 'Mismo estado que entonces' : 'El estado ha cambiado'] : []).concat([(x.sit === 'dev' ? 'Devolución: ' + x.estado : x.estado) + (x.fest ? ' · ' + dm(x.fest) + ' ' + hm(x.fest) : '')].concat(x.devol ? ['Devolución: ' + x.devol.estado + (x.devol.fest ? ' · ' + dm(x.devol.fest) : '')] : []).concat(x.diasSin >= 1 ? ['Sin cambios desde hace ' + (x.diasSin === 1 ? '1 día' : x.diasSin + ' días')] : []).concat(!x.enUltimo ? ['No aparece en el último listado'] : [])), b: [x.cliente || 'Cliente no identificado'].concat(x.instr ? ['Nota: ' + x.instr] : []), c: x.tel ? [x.tel].concat(x.tel2 ? [x.tel2] : []) : ['sin teléfono', motivoSinTel(x)], d: [x.ref, x.canal + ' · ' + x.envio, 'Enviado ' + dm(x.fecha) + (x.sku ? ' · ' + x.sku : '')], f: [x.pob, x.cp] })),
+    M.hechos.length ? 'Ya se ha llamado a todos los clientes de la lista.' : 'No hay nadie a quien llamar: todos los envíos revisados están entregados o en reparto.');
+  if ($('optSin').checked && M.sin.length) {
+    if (c.y < MY + 110) nueva(); else c.y -= 22;
+    txt(`Pedidos de Amazon sin envío en el listado (${M.sin.length})`, MX, c.y - 12, 13, B); c.y -= 22;
+    par('Puede que aún no hayan salido, que vayan por otro transportista o que su día de envío no esté en el listado.', 9, F, gris);
+    tabla([{ t: 'PEDIDO', k: 'a', w: 112 }, { t: 'FECHA PEDIDO', k: 'b', w: 62 }, { t: 'CLIENTE', k: 'c', w: 130, b: 1 }, { t: 'TELÉFONO', k: 'd', w: 66, b: 1 }, { t: 'DESTINO', k: 'e', w: 80 }, { t: 'PRODUCTO', k: 'f', w: 77 }],
+      M.sin.map(p => ({ a: p.id, b: p.fecha ? dm(p.fecha) + ' ' + hm(p.fecha) : '', c: p.cliente, d: [p.tel || (p.general ? '-' : 'sin teléfono')].concat(p.tel2 ? [p.tel2] : []), e: [p.ciudad, p.cp], f: skuDe(p.items) })), '');
+  }
+    listaAlPdf(doc, M);
+  });
+}
+
+/* ============ Correos Express en directo (escenario de Make) ============ */
+const MAKE = { server: 'Make', escenarioRg: 9925738, almacenRg: 193318, escenario: 9918565, almacen: 192885, almacenAmz: 192908, nombre: 'Correos Express en directo', nombreAmz: 'Amazon en directo' };
+const EST_CEX = { 1: 'SIN RECEPCION', 2: 'EN ARRASTRE', 4: 'TRANSITO', 6: 'DELEGACION DESTINO', 7: 'TRAMO DESTINO', 8: 'EN REPARTO', 9: 'REPARTO FALLIDO', 10: 'ALMACEN ESTACIONADO', 11: 'NUEVO REPARTO', 12: 'ENTREGADO', 17: 'DEVUELTO', 39: 'DISPONIBLE EN PUNTO DE RECOGIDA' };
+function fechaCex(d, h) { // DDMMAAAA y HHMMSS
+  d = String(d ?? ''); h = String(h ?? ''); if (!/^\d{8}$/.test(d)) return null; if (!/^\d{6}$/.test(h)) h = '000000';
+  return new Date(+d.slice(4), +d.slice(2, 4) - 1, +d.slice(0, 2), +h.slice(0, 2), +h.slice(2, 4), +h.slice(4));
+}
+function deMake(records) {
+  const lim = v => String(v ?? '').replace(/\s+/g, ' ').trim().replace(/\bEN PUDO\b/gi, 'EN PUNTO DE RECOGIDA');
+  const det = new Map(), envs = [], vistos = new Set(); let run = null, listas = 0;
+  records.filter(r => r && r.data && r.data.tipo === 'detalle').forEach(r => String(r.data.body || '').split('@@ROW@@').forEach(t => {
+    if (!t.trim()) return; try { const d = JSON.parse(t); if (d && d.numEnvio && +d.error === 0) det.set(String(d.numEnvio), d); } catch (e) {}
+  }));
+  records.filter(r => r && r.data && r.data.tipo === 'lista').forEach(r => {
+    const m = /^lista-(\d{4})-(\d{2})-(\d{2})$/.exec(r.key || ''); if (!m) return;
+    const dia = new Date(+m[1], +m[2] - 1, +m[3]);
+    if (+r.data.status === 401 || +r.data.status === 403) throw new Error('Correos Express ha rechazado el usuario o la contraseña de la API.');
+    if (+r.data.status !== 200) throw new Error('Correos Express ha respondido con un error (' + r.data.status + ') al pedir los envíos del ' + dm(dia) + '.');
+    let L; try { L = JSON.parse(r.data.body); } catch (e) { throw new Error('No se puede leer la respuesta de Correos Express del ' + dm(dia) + '.'); }
+    listas++;
+    const t = parseFecha(String(r.data.fecha || '').replace(/^(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1')); if (t && (!run || t > run)) run = t;
+    (L.seguimientoEnvioFecha || []).forEach(sv => {
+      const num = String(sv.numEnvio || ''); if (!num || vistos.has(num)) return; vistos.add(num);
+      const d = det.get(num), cod = lim(sv.estadoEnvio), dev = /^3300/.test(num);
+      const cli = dev && d && lim(d.nomRte) && !/BATER[IÍ]AS VOLTA/i.test(lim(d.nomRte)) ? { nombre: lim(d.nomRte), tel: telLimpio(d.telefRte), dir: lim(d.dirRte), pob: lim(d.pobRte), cp: lim(d.codPosNacRte) ? lim(d.codPosNacRte).padStart(5, '0') : '' } : null;
+      envs.push({ cli, envio: num, ref: lim(sv.referencia) || (d ? lim(d.ref) : ''), fecha: dia, prod: dev ? 'DEVOLUCION' : '', directo: true,
+        dest: d ? lim(d.nomDest) : '', dir: d ? lim(d.dirDest) : '', pob: d ? lim(d.pobDest) : '', cp: d && lim(d.codPosNacDest) ? lim(d.codPosNacDest).padStart(5, '0') : '',
+        bultos: d ? lim(d.numBultos) : '', kilos: d ? lim(d.kilos) : '', recep: '', obs: d ? lim(d.observac) : '',
+        estado: d ? lim(d.descEstado) + (lim(d.descIncEstado) ? ': ' + lim(d.descIncEstado) : '') : (EST_CEX[cod] || 'ESTADO ' + cod),
+        fest: d ? fechaCex(d.fechaEstado, d.horaEstado) : null, tel: d ? telLimpio(d.telefDest) : '',
+        hist: d ? (d.estadoEnvios || []).map(e => ({ t: lim(e.descEstado) + (lim(e.descIncEstado) ? ': ' + lim(e.descIncEstado) : ''), f: fechaCex(e.fechaEstado, e.horaEstado), del: lim(e.nombreDelegacion) })) : [] });
+    });
+  });
+  if (!listas) throw new Error('Make no tiene guardada ninguna consulta a Correos Express. Pulsa «Consultar Amazon y Correos Express».');
+  let desde = null, hasta = null; envs.forEach(e => { if (!desde || e.fecha < desde) desde = e.fecha; if (!hasta || e.fecha > hasta) hasta = e.fecha; });
+  return { nombre: MAKE.nombre, impreso: run, envs, desde, hasta, directo: true, detalles: det.size };
+}
+const mcpP = window.claude && window.claude.use ? window.claude.use('mcp').catch(() => null) : Promise.resolve(null);
+function errorMake(e) {
+  const c = e && e.code, m = (e && e.message) || '';
+  if (c === 'needs_reauth') return 'Make ha caducado en Claude. Vuelve a conectarlo en Ajustes → Conectores y prueba otra vez.';
+  if (c === 'server_not_connected' || c === 'selection_required' || c === 'server_not_found') return 'Esta página no encuentra tu conector de Make. Añádelo o actívalo en Claude (Ajustes → Conectores).';
+  if (c === 'not_in_manifest' || c === 'not_granted' || c === 'consent_required') return 'No has dado permiso a esta página para usar Make. Recarga la página y acepta cuando lo pida.';
+  if (c === 'blocked_by_policy' || c === 'approval_required') return 'Tu organización no permite que esta página use Make.';
+  if (c === 'escenario') return 'El escenario «LLAMADAS AMAZON» ha fallado en Make' + (m ? ': ' + m : '') + '. Abre el escenario en Make para ver el error.';
+  if (c === 'tool_error') return 'Make ha devuelto un error' + (m ? ': ' + m : '') + '.';
+  if (c === 'config') return m || 'Falta configurar el servidor del panel.';
+  if (c === 'server_unavailable' || c === 'upstream_error' || c === 'rate_limited') return 'Make no ha respondido a tiempo. Espera un minuto y pulsa «Cargar la última consulta guardada».';
+  if (c === 'capability_disabled' || c === 'capability_removed') return 'Esta vista no puede conectar con Make. Abre la página desde Claude.';
+  return m || 'No se ha podido hacer la consulta en Make.';
+}
+const espera = ms => new Promise(r => setTimeout(r, ms));
+function cargaUtil(res) { let p = res && res.payload; if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = null; } } return p; }
+function registros(res) { let r = cargaUtil(res); if (r && !Array.isArray(r)) r = r.records || r.data || r.result || []; return Array.isArray(r) ? r : []; }
+function amazonDeMake(records) {
+  const r = records.find(x => x && x.data && x.data.tipo === 'amazon');
+  if (!r || !String(r.data.body || '').trim()) throw new Error('Make no tiene guardado ningún informe de Amazon.');
+  let dato; try { dato = leerAmazon(String(r.data.body), MAKE.nombreAmz); } catch (e) { throw new Error('Amazon no ha devuelto un informe de pedidos válido.'); }
+  dato.directo = true; dato.impreso = parseFecha(String(r.data.fecha || '').replace(/^(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1'));
+  return dato;
+}
+const SIN_PERMISO = ['needs_reauth', 'server_not_connected', 'selection_required', 'server_not_found', 'not_in_manifest', 'not_granted', 'consent_required', 'blocked_by_policy', 'approval_required', 'capability_disabled', 'capability_removed'];
+// Espera a que termine la ejecución del escenario. Devuelve sus datos, o null si no se ha podido confirmar que haya terminado.
+async function esperarFin(mcp, ex, say, o) {
+  o = Object.assign({ escenario: MAKE.escenario, texto: 'Make está consultando Amazon y Correos Express… {s} s. Suele tardar alrededor de un minuto.', primera: 20000, cada: 6000, sinId: 80000 }, o);
+  const t0 = Date.now(); let fallos = 0;
+  const seg = () => Math.round((Date.now() - t0) / 1000);
+  const tic = setInterval(() => say(o.texto.replace('{s}', seg())), 1000);
+  try {
+    await espera(ex ? o.primera : o.sinId);
+    while (ex && Date.now() - t0 < 240000) {
+      try {
+        let p = cargaUtil(await mcp.callTool(MAKE.server, 'executions_get', { scenarioId: o.escenario, executionId: ex }, { cache: false }));
+        p = (p && p.result) || p || {};
+        if (p.eventType === 'EXECUTION_END' || p.status != null) return p;
+        fallos = 0;
+      } catch (e) { if (SIN_PERMISO.includes(e && e.code) || ++fallos >= 3) break; }
+      await espera(o.cada);
+    }
+    const resto = o.sinId - (Date.now() - t0); if (resto > 0) await espera(resto);
+    return null;
+  } finally { clearInterval(tic); }
+}
+async function consultar(lanzar) {
+  const b1 = $('btnCex'), b2 = $('btnCexUlt'), msg = $('cexMsg'), say = t => { msg.hidden = !t; msg.textContent = t || ''; };
+  b1.disabled = b2.disabled = true;
+  try {
+    const mcp = await mcpP;
+    if (!mcp) { say('Esta vista no puede conectar con Make. Abre la página desde Claude, con el conector de Make activado.'); return; }
+    const t0 = new Date(); let fin = null; const avisos = [];
+    if (lanzar) {
+      const dias = +$('optDays').value || 4, hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      const fs = [ymd(hoy)], d = new Date(hoy); let n = 0;
+      while (n < dias) { d.setDate(d.getDate() - 1); if (d.getDay() !== 0) { n++; fs.unshift(ymd(d)); } }
+      say('Lanzando la consulta en Make…');
+      let ex = null;
+      try {
+        let pr = cargaUtil(await mcp.callTool(MAKE.server, 'scenarios_run', { scenarioId: MAKE.escenario, responsive: false, data: { fechas: fs.join(','), hoy: ymd(hoy) } }, { cache: false }));
+        pr = (pr && pr.result) || pr || {}; ex = pr.executionId || null;
+      } catch (e) {
+        // Si ya había una consulta en marcha se espera a que termine; cualquier otro fallo se muestra tal cual.
+        if (!(e && e.code === 'tool_error' && /already being executed/i.test(e.message || ''))) throw e;
+      }
+      fin = await esperarFin(mcp, ex, say);
+      if (fin && +fin.status === 3) avisos.push('El escenario de Make ha terminado con un error' + (fin.error && fin.error.message ? ' (' + fin.error.message + ')' : '') + '.');
+    }
+    say('Leyendo el resultado…');
+    const leer = async (almacen, limite, conv) => { try { return { dato: conv(registros(await mcp.callTool(MAKE.server, 'data-store-records_list', { dataStoreId: almacen, limit: limite }, { cache: false }))) }; } catch (e) { return { error: e instanceof Error ? e.message : errorMake(e), code: e && e.code }; } };
+    const C = await leer(MAKE.almacen, 100, deMake);
+    const A = SIN_PERMISO.includes(C.code) ? { error: C.error, code: C.code } : await leer(MAKE.almacenAmz, 10, amazonDeMake);
+    if (!C.dato && !A.dato) { say(C.error === A.error || !A.error ? C.error : 'Correos Express: ' + C.error + ' Amazon: ' + A.error); return; }
+    // Si no consta que la consulta nueva haya terminado bien, se comprueba por la hora que lo guardado es de ahora.
+    const viejo = x => lanzar && !(fin && +fin.status === 1) && (!x.impreso || x.impreso < new Date(t0.getTime() - 180000));
+    const pon = (arr, dato) => { const i = arr.findIndex(x => x.nombre === dato.nombre); if (i >= 0) arr.splice(i, 1); arr.push(dato); };
+    const partes = [];
+    if (C.dato) { pon(S.correos, C.dato); partes.push(`${C.dato.envs.length} envíos de Correos Express` + (C.dato.impreso ? `, consultados el ${dm(C.dato.impreso)} a las ${hm(C.dato.impreso)}` : '') + ` (con detalle de ${C.dato.detalles} que no están entregados ni en reparto o son devoluciones)`); if (viejo(C.dato)) avisos.push('La consulta nueva a Correos Express no ha terminado: se muestra la última guardada.'); }
+    else avisos.push('Correos Express: ' + C.error);
+    if (A.dato) { pon(S.amazon, A.dato); partes.push(`${A.dato.pedidos.size} pedidos de Amazon` + (A.dato.desde ? ` del ${dm(A.dato.desde)} al ${dm(A.dato.hasta)}` : '')); if (viejo(A.dato)) avisos.push('Amazon no ha entregado un informe nuevo en esta consulta: se usan los pedidos guardados' + (A.dato.impreso ? ` el ${dm(A.dato.impreso)} a las ${hm(A.dato.impreso)}` : '') + '.'); }
+    else avisos.push('Amazon: ' + A.error + ' La lista sale igualmente, sin el producto.');
+    S.errores = []; S.demo = false;
+    pintar();
+    say('Cargados ' + partes.join(' y ') + '.' + (avisos.length ? ' ' + avisos.join(' ') : ''));
+  } catch (e) { say(e instanceof Error ? e.message : errorMake(e)); }
+  finally { b1.disabled = b2.disabled = false; }
+}
+const descargas = window.claude && window.claude.use ? window.claude.use('downloads').catch(() => null) : Promise.resolve(null);
+async function generarPdf() {
+  const btn = $('btnPdf'), msg = $('pdfMsg'), say = t => { msg.hidden = !t; msg.textContent = t || ''; };
+  btn.disabled = true; say('Preparando el PDF…');
+  try {
+    if (!window.PDFLib) throw new Error('lib');
+    const bytes = await construirPdf(M);
+    const d = await descargas;
+    if (!d) { say('Esta vista no permite guardar archivos. Abre la página desde Claude para descargar el PDF.'); return; }
+    const lista = M.llamar.slice();
+    await d.save({ filename: `Llamadas Entregas Amazon ${ymd(M.informe)}.pdf`, data: new Blob([bytes], { type: 'application/pdf' }) });
+    registrarLista(lista);
+    say('PDF guardado.');
+  } catch (e) {
+    const c = e && e.code;
+    say(c === 'declined' ? 'No se ha guardado el PDF.' : c === 'rate_limited' ? 'Ya hay una descarga pendiente de confirmar. Inténtalo en unos segundos.' : (e && e.message === 'lib') ? 'No se ha podido cargar el generador de PDF. Recarga la página.' : 'No se ha podido generar el PDF. Inténtalo de nuevo.');
+  } finally { btn.disabled = !M.informe; }
+}
+
+/* ============ Control de Llamadas: lista del PDF frente a llamadas de Ringover ============ */
+const C = { listas: [], llamadas: null, tab: 'no', q: '', errores: [] };
+const n9 = s => { const d = String(s ?? '').replace(/\D/g, ''); return d.length >= 9 ? d.slice(-9) : ''; };
+const durTxt = s => { s = Math.round(+s || 0); return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min' + (s % 60 ? ' ' + (s % 60) + ' s' : ''); };
+// Make guarda una fila por llamada: sentido|origen|destino|inicio|segundos hablados|contestada|estado final|agente|número del contacto
+function filaLlamada(t) {
+  const f = t.split('|'); if (f.length < 6) return null;
+  const dir = /^in/i.test(f[0].trim()) ? 'in' : 'out', ini = new Date(f[3].trim()); if (isNaN(ini)) return null;
+  const dur = +f[4] || 0, est = (f[6] || '').trim().toUpperCase();
+  // Una entrante solo cuenta como atendida si la cogió una persona (no un buzón, un mensaje grabado ni un desvío).
+  const cogida = /^(true|1)$/i.test(f[5].trim()) || dur > 0;
+  return { dir, n: n9(f[8]) || n9(dir === 'in' ? f[1] : f[2]), t: ini, dur, ok: cogida && (dir === 'out' || est === 'ANSWERED'), est, ag: (f[7] || '').replace(/\s+/g, ' ').trim() };
+}
+function llamadasDeMake(records) {
+  const pags = records.filter(r => r && r.data && r.data.tipo === 'ringover');
+  if (!pags.length) throw new Error('Make no tiene guardada ninguna consulta a Ringover. Pulsa «Comprobar en Ringover».');
+  let desde = null, hasta = null, consultado = null; const calls = [], vistos = new Set();
+  pags.forEach(r => {
+    const st = +r.data.status;
+    if (st === 401) throw new Error('Ringover ha rechazado la clave de API. Hay que revisarla en el escenario de Make.');
+    if (st === 403) throw new Error('La clave de API de Ringover no tiene permiso para leer las llamadas. Actívalo en Ringover (Dashboard > Desarrollador > Clave API > Derechos).');
+    if (st !== 200 && st !== 204) throw new Error('Ringover ha respondido con un error (' + r.data.status + ').');
+    const k = String(r.key || '').split('|'); if (k[1] && k[2]) { const a = new Date(k[1]), b = new Date(k[2]); if (!isNaN(a) && (!desde || a < desde)) desde = a; if (!isNaN(b) && (!hasta || b > hasta)) hasta = b; }
+    const t = parseFecha(String(r.data.fecha || '').replace(/^(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1')); if (t && (!consultado || t > consultado)) consultado = t;
+    String(r.data.body || '').split('@@ROW@@').forEach(x => { if (!x.trim()) return; const c = filaLlamada(x); if (!c) return; const id = c.dir + c.n + c.t.getTime(); if (vistos.has(id)) return; vistos.add(id); calls.push(c); });
+  });
+  calls.sort((a, b) => a.t - b.t);
+  return { desde, hasta, consultado, calls, completo: !pags.some(r => +r.data.status === 200 && String(r.data.body || '').split('@@ROW@@').length >= 1000 && /\|1000$/.test(String(r.key || ''))) };
+}
+const RES = { no: ['c', '!', 'Sin llamar'], nores: ['w', '↺', 'Sin respuesta'], cli: ['a', '←', 'Llamó el cliente'], ok: ['g', '✓', 'Contestada'], sintel: ['', '·', 'Sin teléfono'], pend: ['', '·', 'Sin comprobar'] };
+const ORD_RES = { no: 0, nores: 1, cli: 2, ok: 3, sintel: 4, pend: 5 };
+function calcularControl() {
+  const porEnvio = new Map();
+  // Un cliente que sale en varios PDF cuenta una sola vez: las llamadas se miran desde el primero y el estado es el del último.
+  C.listas.slice().sort((a, b) => a.gen - b.gen).forEach(l => l.filas.forEach(f => { const k = f.envio || f.ref + f.tel, a = porEnvio.get(k); porEnvio.set(k, Object.assign({}, f, { gen: a ? a.gen : l.gen, gens: (a ? a.gens : []).concat([l.gen]) })); }));
+  const K = { filas: [...porEnvio.values()], n: { no: 0, nores: 0, cli: 0, ok: 0, sintel: 0, pend: 0 }, desde: C.listas.reduce((m, l) => !m || l.gen < m ? l.gen : m, null), ll: C.llamadas, sinCubrir: false, discrepan: 0 };
+  const porNum = new Map(); if (K.ll) K.ll.calls.forEach(c => { if (c.n) (porNum.get(c.n) || porNum.set(c.n, []).get(c.n)).push(c); });
+  K.sinCubrir = !!(K.ll && K.desde && K.ll.desde && K.ll.desde.getTime() > K.desde.getTime() + 60000);
+  K.filas.forEach(x => {
+    const nums = [...new Set([n9(x.tel), n9(x.tel2)].filter(Boolean))];
+    x.calls = !K.ll ? [] : nums.flatMap(n => porNum.get(n) || []).filter(c => c.t >= x.gen).sort((a, b) => a.t - b.t);
+    const out = x.calls.filter(c => c.dir === 'out');
+    x.res = !nums.length ? 'sintel' : !K.ll ? 'pend' : out.some(c => c.ok) ? 'ok' : x.calls.some(c => c.dir === 'in' && c.ok) ? 'cli' : out.length ? 'nores' : 'no';
+    x.intentos = out.length; x.ultima = x.calls.length ? x.calls[x.calls.length - 1].t : null;
+    x.agentes = [...new Set(x.calls.map(c => c.ag).filter(Boolean))];
+    const m = marcas().get(x.envio); x.marcado = m ? (m.t || 1) : 0;
+    x.discrepa = !!(x.marcado && K.ll && (x.res === 'no' || x.res === 'sintel')); if (x.discrepa) K.discrepan++;
+    K.n[x.res]++;
+  });
+  K.filas.sort((a, b) => (ORD_RES[a.res] - ORD_RES[b.res]) || (b.discrepa - a.discrepa) || a.cliente.localeCompare(b.cliente));
+  return K;
+}
+let K = null;
+const EST_IN = { VOICEMAIL: 'dejó mensaje en el buzón', PERMANENT_TRANSFERED: 'desviada a otro teléfono', ANNOUNCE: 'oyó el mensaje grabado', ANNOUNCE_ANSWERED: 'oyó el mensaje grabado' };
+const llamadaTxt = c => `${dm(c.t)} ${hm(c.t)} · ${c.dir === 'in' ? 'llamó el cliente' : 'saliente'} · ${c.ok ? (c.dir === 'in' ? 'atendida, ' : 'contestada, ') + durTxt(c.dur) : c.dir === 'in' ? (EST_IN[c.est] || 'no se le atendió') : 'sin respuesta'}${c.ag ? ' · ' + c.ag : ''}`;
+function pintarControl() {
+  K = calcularControl();
+  $('listP').innerHTML = C.listas.map((l, i) => `<li><span><b>${esc(l.nombre)}</b> · ${l.filas.length} ${l.filas.length === 1 ? 'cliente' : 'clientes'} · generado el ${dm(l.gen)} a las ${hm(l.gen)}</span><button type="button" data-rmp="${i}" aria-label="Quitar ${esc(l.nombre)}">×</button></li>`).join('');
+  $('addP').textContent = C.listas.length ? '+ Añadir otro PDF' : 'Elegir PDF';
+  $('rgPeriodo').textContent = K.desde ? `Se piden a Ringover las llamadas desde el ${dm(K.desde)} a las ${hm(K.desde)}, que es cuando se generó ${C.listas.length > 1 ? 'el primer PDF' : 'la lista'}, hasta ahora. Pasa por el escenario «LLAMADAS AMAZON - Control Ringover» de Make.` : 'Primero sube el PDF: se pedirán a Ringover las llamadas hechas desde que se generó hasta ahora.';
+  $('btnRg').disabled = !K.desde || pintarControl.ocupado; $('btnRgUlt').disabled = !K.desde || pintarControl.ocupado;
+  const N = []; C.errores.forEach(e => N.push(['crit', '!', esc(e)]));
+  if (C.listas.some(l => l.demo)) N.push(['demo', 'i', 'Este PDF se generó con los datos de ejemplo: los clientes y teléfonos son inventados.']);
+  if (K.sinCubrir) N.push(['warn', '!', `Las llamadas cargadas empiezan el ${dm(K.ll.desde)} a las ${hm(K.ll.desde)}, después de generarse la lista (${dm(K.desde)} ${hm(K.desde)}). Pulsa «Comprobar en Ringover» para pedir el periodo completo.`]);
+  if (K.ll && !K.ll.completo) N.push(['warn', '!', 'Ringover ha devuelto muchas llamadas y puede que falten las más recientes. Comprueba con un periodo más corto.']);
+  if (K.discrepan) N.push(['warn', '!', `${K.discrepan === 1 ? 'Hay 1 cliente marcado' : 'Hay ' + K.discrepan + ' clientes marcados'} como «llamado» sin ninguna llamada en Ringover.`]);
+  $('cNotes').innerHTML = N.map(([c, i, t]) => `<div class="note ${c}"><span class="ic" aria-hidden="true">${i}</span><p>${t}</p></div>`).join('');
+  const n = K.n, tot = K.filas.length;
+  $('cSum').innerHTML = !tot ? `<p class="cap">Sube el PDF de llamadas para ver a quién había que llamar.</p>` : !K.ll ? `
+    <div class="sum-top"><div class="hero"><span class="v">${tot}</span><span class="l">${tot === 1 ? 'cliente' : 'clientes'} en la lista</span></div></div>
+    <p class="cap">Pulsa «Comprobar en Ringover» para ver a cuáles se ha llamado.</p>` : `
+    <div class="sum-top">
+      <div class="hero"><span class="v">${n.no}</span><span class="l">sin llamar<span style="display:block;font-weight:400;font-size:13px;color:var(--ink2)">de ${tot} en la lista</span></span></div>
+      <div class="stats">
+        <div class="stat"><span class="v">${n.ok}</span><span class="l"><span class="dot g"></span>✓ Contestadas</span></div>
+        <div class="stat"><span class="v">${n.nores}</span><span class="l"><span class="dot a"></span>↺ Sin respuesta</span></div>
+        <div class="stat"><span class="v">${n.cli}</span><span class="l"><span class="dot a"></span>← Llamó el cliente</span></div>
+        <div class="stat"><span class="v">${n.no}</span><span class="l"><span class="dot c"></span>! Sin llamar</span></div>
+        <div class="stat"><span class="v">${n.sintel}</span><span class="l"><span class="dot n"></span>Sin teléfono</span></div>
+      </div>
+    </div>
+    <div class="bar" role="img" aria-label="Contestadas ${n.ok}, sin respuesta o llamó el cliente ${n.nores + n.cli}, sin llamar ${n.no}, de ${tot}">
+      <i class="g" style="flex:${n.ok}" title="Contestadas: ${n.ok}"${n.ok ? '' : ' hidden'}></i><i class="a" style="flex:${n.nores + n.cli}" title="Sin respuesta o llamó el cliente: ${n.nores + n.cli}"${n.nores + n.cli ? '' : ' hidden'}></i><i class="c" style="flex:${n.no}" title="Sin llamar: ${n.no}"${n.no ? '' : ' hidden'}></i>
+    </div>
+    <p class="cap">Llamadas de Ringover del ${dm(K.ll.desde)} ${hm(K.ll.desde)} al ${dm(K.ll.hasta)} ${hm(K.ll.hasta)}${K.ll.consultado ? `, consultadas el ${dm(K.ll.consultado)} a las ${hm(K.ll.consultado)}` : ''}: ${K.ll.calls.length} en total. Solo cuentan las hechas después de generarse la lista de cada cliente.</p>`;
+  const T = [['no', 'Sin llamar', n.no], ['nores', 'Sin respuesta', n.nores + n.cli], ['ok', 'Contestadas', n.ok], ['todos', 'Todos', tot]];
+  $('cTabs').innerHTML = T.map(([k, t, c]) => `<button type="button" role="tab" data-ctab="${k}" aria-selected="${C.tab === k}">${t}<span class="n">${c}</span></button>`).join('');
+  $('btnCPdf').disabled = !tot || !K.ll;
+  pintarTablaControl();
+}
+function filasControl() { const t = C.tab; return K.filas.filter(x => t === 'todos' || !K.ll || (t === 'no' ? (x.res === 'no' || x.res === 'sintel') : t === 'nores' ? (x.res === 'nores' || x.res === 'cli') : x.res === t)); }
+function pintarTablaControl() {
+  const q = norm(C.q), src = filasControl().filter(x => !q || norm([x.cliente, x.tel, x.tel2, x.ref, x.envio, x.pob, x.agentes.join(' ')].join(' ')).includes(q));
+  $('cTable').innerHTML = src.length ? `<table><thead><tr><th>Resultado</th><th>Cliente</th><th>Teléfono</th><th>Llamadas en Ringover</th><th>Marcado</th><th>Pedido</th></tr></thead><tbody>` + src.map(x => {
+    const [c, ic, t] = RES[x.res];
+    return `<tr><td><span class="pill ${c}"><b aria-hidden="true">${ic}</b>${t}</span>${x.intentos > 1 ? `<span class="sub">${x.intentos} intentos</span>` : ''}</td>
+      <td>${x.cliente ? esc(x.cliente) : '<span class="muted">cliente no identificado</span>'}<span class="sub">${esc(x.pob)}</span></td>
+      <td>${x.tel ? `<span class="tel">${esc(x.tel)}</span>` + (x.tel2 ? `<span class="sub tel">${esc(x.tel2)}</span>` : '') : '<span class="muted">sin teléfono</span>'}</td>
+      <td>${x.calls.length ? x.calls.slice(-4).map(c => `<span class="sub" style="color:var(--ink)">${esc(llamadaTxt(c))}</span>`).join('') + (x.calls.length > 4 ? `<span class="sub">y ${x.calls.length - 4} más antes</span>` : '') : `<span class="muted">${x.res === 'pend' ? 'sin comprobar' : x.res === 'sintel' ? 'no se puede comprobar sin teléfono' : 'ninguna desde el ' + dm(x.gen) + ' ' + hm(x.gen)}</span>`}</td>
+      <td>${x.marcado ? 'Sí' + (x.marcado > 1 ? `<span class="sub nw">${dm(new Date(x.marcado))} ${hm(new Date(x.marcado))}</span>` : '') : '<span class="muted">No</span>'}${x.discrepa ? '<span class="sub"><b>Sin llamada en Ringover</b></span>' : ''}</td>
+      <td><span class="mono nw">${esc(x.ref)}</span><span class="sub">${x.sit === 'dev' ? 'Devolución · ' : ''}${esc(x.estado)}</span>${x.gens.length > 1 ? `<span class="sub"><b>En ${x.gens.length} PDF</b>: ${esc(listaY(x.gens.map(dm)))}</span>` : ''}</td></tr>`;
+  }).join('') + '</tbody></table>'
+    : `<div class="empty">${!K.filas.length ? 'Aquí aparecerá la lista de clientes del PDF con el resultado de cada llamada.' : q ? 'Nada coincide con la búsqueda.' : C.tab === 'no' ? 'No queda nadie sin llamar.' : 'No hay clientes en este apartado.'}</div>`;
+}
+async function cargarPdfs(files) {
+  C.errores = [];
+  for (const f of files) {
+    try {
+      if (!window.PDFLib) throw new Error('no se ha podido cargar el lector de PDF. Recarga la página.');
+      const l = await listaDelPdf(new Uint8Array(await f.arrayBuffer()), f.name);
+      const i = C.listas.findIndex(x => x.gen.getTime() === l.gen.getTime()); if (i >= 0) C.listas.splice(i, 1); // el mismo PDF subido dos veces
+      C.listas.push(l); C.listas.sort((a, b) => a.gen - b.gen);
+    } catch (e) { C.errores.push(f.name + ': ' + ((e && e.message) || 'no se ha podido leer.')); }
+  }
+  pintarControl();
+}
+function usarListaActual() {
+  C.errores = [];
+  if (!M || !M.informe) { C.errores.push('Todavía no hay ninguna lista en «Llamadas Clientes». Haz allí la consulta o sube el PDF.'); pintarControl(); return; }
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const l = { nombre: 'Lista actual de Llamadas Clientes', gen: hoy, demo: S.demo, filas: M.llamar.concat(M.hechos).map(x => ({ envio: x.envio, ref: x.ref, cliente: x.cliente, tel: x.tel, tel2: x.tel2 || '', sit: x.sit === 'dev' ? 'dev' : 'no', estado: x.estado, pob: x.pob })) };
+  const i = C.listas.findIndex(x => x.nombre === l.nombre); if (i >= 0) C.listas.splice(i, 1);
+  C.listas.push(l); pintarControl();
+}
+async function comprobarRingover(lanzar) {
+  const msg = $('rgMsg'), say = t => { msg.hidden = !t; msg.textContent = t || ''; };
+  pintarControl.ocupado = true; $('btnRg').disabled = $('btnRgUlt').disabled = true;
+  try {
+    const mcp = await mcpP;
+    if (!mcp) { say('Esta vista no puede conectar con Make. Abre la página desde Claude, con el conector de Make activado.'); return; }
+    const K0 = calcularControl(); if (!K0.desde) { say('Primero sube el PDF de llamadas.'); return; }
+    let fin = null, aviso = '';
+    if (lanzar) {
+      let desde = new Date(K0.desde.getTime() - 60000); const hasta = new Date(), tope = new Date(hasta.getTime() - 14 * 86400000);
+      if (desde < tope) { desde = tope; aviso = ' Solo se han pedido los últimos 14 días.'; }
+      say('Lanzando la consulta a Ringover…');
+      let ex = null;
+      try {
+        let pr = cargaUtil(await mcp.callTool(MAKE.server, 'scenarios_run', { scenarioId: MAKE.escenarioRg, responsive: false, data: { desde: desde.toISOString(), hasta: hasta.toISOString() } }, { cache: false }));
+        pr = (pr && pr.result) || pr || {}; ex = pr.executionId || null;
+      } catch (e) { if (!(e && e.code === 'tool_error' && /already being executed/i.test(e.message || ''))) throw e; }
+      fin = await esperarFin(mcp, ex, say, { escenario: MAKE.escenarioRg, texto: 'Make está pidiendo las llamadas a Ringover… {s} s.', primera: 5000, cada: 4000, sinId: 25000 });
+      if (fin && +fin.status === 3) aviso += ' El escenario de Make ha terminado con un error' + (fin.error && fin.error.message ? ' (' + fin.error.message + ')' : '') + '.';
+    }
+    say('Leyendo las llamadas…');
+    C.llamadas = llamadasDeMake(registros(await mcp.callTool(MAKE.server, 'data-store-records_list', { dataStoreId: MAKE.almacenRg, limit: 20 }, { cache: false })));
+    C.errores = [];
+    const k = calcularControl();
+    say(`Cargadas ${C.llamadas.calls.length} llamadas de Ringover. De ${k.filas.length} clientes: ${k.n.ok} contestadas, ${k.n.nores + k.n.cli} sin respuesta y ${k.n.no} sin llamar.` + aviso);
+  } catch (e) { say(e instanceof Error ? e.message : errorMake(e)); }
+  finally { pintarControl.ocupado = false; pintarControl(); }
+}
+async function construirPdfControl(K) {
+  const ahora = new Date();
+  return hacerPdf('Control de Llamadas', 'Control de Llamadas · lista de clientes frente a las llamadas registradas en Ringover', c => {
+    const { F, B, ink, gris, rojo, MX, txt, par, tabla } = c, n = K.n;
+    txt('Control de Llamadas', MX, c.y - 16, 20, B); c.y -= 28;
+    par(`Ringover · llamadas del ${dm(K.ll.desde)} ${hm(K.ll.desde)} al ${dm(K.ll.hasta)} ${hm(K.ll.hasta)} · ${C.listas.length === 1 ? 'lista generada el ' + dm(K.desde) + ' a las ' + hm(K.desde) : C.listas.length + ' listas, la primera del ' + dm(K.desde)}`, 10, F, gris);
+    par(`En la lista ${K.filas.length}  ·  Contestadas ${n.ok}  ·  Sin respuesta ${n.nores}  ·  Llamó el cliente ${n.cli}  ·  Sin llamar ${n.no}  ·  Sin teléfono ${n.sintel}`, 9.5, B, ink);
+    if (K.discrepan) par(`${K.discrepan === 1 ? '1 cliente marcado' : K.discrepan + ' clientes marcados'} como «llamado» sin ninguna llamada en Ringover.`, 9, B, rojo, 3);
+    if (K.sinCubrir) par('AVISO: las llamadas cargadas no cubren todo el periodo desde que se generó la lista.', 9, B, rojo, 3);
+    if (C.listas.some(l => l.demo)) par('DATOS DE EJEMPLO: clientes y teléfonos inventados.', 9, B, rojo, 3);
+    c.y -= 4;
+    tabla([{ t: 'RESULTADO', k: 'a', w: 82, b: 1, max: 4 }, { t: 'CLIENTE', k: 'b', w: 118, b: 1 }, { t: 'TELÉFONO', k: 'c', w: 66, b: 1 }, { t: 'LLAMADAS EN RINGOVER', k: 'd', w: 151, max: 6 }, { t: 'PEDIDO', k: 'e', w: 110 }],
+      K.filas.map(x => ({ a: [RES[x.res][2]].concat(x.intentos > 1 ? [x.intentos + ' intentos'] : []).concat(x.marcado ? ['Marcado como llamado'] : []).concat(x.discrepa ? ['Sin llamada en Ringover'] : []), b: [x.cliente || 'Cliente no identificado', x.pob], c: x.tel ? [x.tel].concat(x.tel2 ? [x.tel2] : []) : ['sin teléfono'], d: x.calls.length ? x.calls.slice(-3).map(llamadaTxt) : [x.res === 'sintel' ? 'No se puede comprobar' : 'Ninguna'], e: [x.ref, (x.sit === 'dev' ? 'Devolución · ' : '') + x.estado].concat(x.gens.length > 1 ? ['En ' + x.gens.length + ' PDF: ' + listaY(x.gens.map(dm))] : []) })), '');
+    c.doc.setSubject('Control generado el ' + dmy(ahora) + ' a las ' + hm(ahora));
+  });
+}
+async function generarPdfControl() {
+  const btn = $('btnCPdf'), msg = $('cPdfMsg'), say = t => { msg.hidden = !t; msg.textContent = t || ''; };
+  btn.disabled = true; say('Preparando el PDF…');
+  try {
+    if (!window.PDFLib) throw new Error('lib');
+    const bytes = await construirPdfControl(K);
+    const d = await descargas;
+    if (!d) { say('Esta vista no permite guardar archivos. Abre la página desde Claude para descargar el PDF.'); return; }
+    await d.save({ filename: `Control de Llamadas ${ymd(new Date())}.pdf`, data: new Blob([bytes], { type: 'application/pdf' }) });
+    say('PDF guardado.');
+  } catch (e) {
+    const c = e && e.code;
+    say(c === 'declined' ? 'No se ha guardado el PDF.' : c === 'rate_limited' ? 'Ya hay una descarga pendiente de confirmar. Inténtalo en unos segundos.' : (e && e.message === 'lib') ? 'No se ha podido cargar el generador de PDF. Recarga la página.' : 'No se ha podido generar el PDF. Inténtalo de nuevo.');
+  } finally { btn.disabled = !K.filas.length || !K.ll; }
+}
+function verParte(p) {
+  $('pLlamadas').hidden = p !== 'llamadas'; $('pControl').hidden = p !== 'control';
+  document.querySelectorAll('[data-part]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.part === p)));
+  if (p === 'control') pintarControl();
+}
+
+/* ============ marcas de «llamado»: almacén de la página, compartido entre quienes la abren ============ */
+// Un documento por día (llamados/AAAA-MM-DD) con { e: { nºEnvío: ms } }; 0 = marca quitada. Sin almacén se guardan en este navegador.
+const dbP = window.claude && window.claude.use ? window.claude.use('db').catch(() => null) : Promise.resolve(null);
+const DB = { ok: false, dias: new Set(), cola: Promise.resolve(), pend: new Map(), soloLectura: false };
+function avisoMarca(t) { const el = $('marcaMsg'); el.hidden = !t; el.textContent = t || ''; }
+function deSnapshot(snap) {
+  const m = new Map(); DB.dias = new Set();
+  snap.docs.forEach(d => { DB.dias.add(d.id); const e = (d.data() || {}).e || {}; Object.keys(e).forEach(k => { const t = +e[k] || 0, a = m.get(k); if (!a || t >= a.t) m.set(k, { t, dia: d.id }); }); });
+  [...m].forEach(([k, v]) => { if (!v.t) m.delete(k); });
+  DB.pend.forEach((v, k) => { if (v) m.set(k, v); else m.delete(k); }); // lo que aún se está guardando manda sobre lo recibido
+  S.llamados = m; DB.ok = true; pintar(); if (!$('pControl').hidden) pintarControl();
+  // limpieza: las marcas de hace más de 60 días ya no hacen falta
+  const lim = ymd(new Date(Date.now() - 60 * 86400000)), viejos = snap.docs.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.id) && d.id < lim).slice(0, 5);
+  if (viejos.length && !DB.soloLectura && !DB.limpio) { DB.limpio = true; dbP.then(db => viejos.forEach(d => db.doc('llamados/' + d.id).delete().catch(() => {}))); }
+}
+dbP.then(db => { if (!db) return; try { db.collection('llamados').onSnapshot(deSnapshot, () => { DB.ok = false; }); } catch (e) {} });
+// Al guardar el PDF: se apunta la lista del día (nº de envío y estado, sin datos del cliente).
+function registrarLista(filas) {
+  if (S.demo || !filas.length) return;
+  const dia = ymd(new Date()), t = Date.now(), e = {}; filas.forEach(x => { e[x.envio] = { t, es: x.estado }; });
+  HIST.local[dia] = Object.assign({}, HIST.local[dia], e);
+  const lim = ymd(new Date(Date.now() - 60 * 86400000)); Object.keys(HIST.local).forEach(k => { if (k < lim) delete HIST.local[k]; });
+  try { localStorage.setItem('ce_listas', JSON.stringify(HIST.local)); } catch (err) {}
+  histRehacer();
+  dbP.then(db => { if (!db || !DB.ok || DB.soloLectura) return;
+    DB.cola = DB.cola.then(async () => { const ref = db.doc('listas/' + dia); try { if (HIST.db[dia] || (await ref.get()).exists) await ref.update({ e }); else await ref.set({ e }); } catch (err) {} });
+  });
+}
+dbP.then(db => { if (!db) return; try { db.collection('listas').onSnapshot(snap => {
+  HIST.db = {}; snap.docs.forEach(d => { HIST.db[d.id] = (d.data() || {}).e || {}; }); histRehacer(); pintar();
+  const lim = ymd(new Date(Date.now() - 60 * 86400000)), viejos = snap.docs.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.id) && d.id < lim).slice(0, 5);
+  if (viejos.length && !DB.soloLectura && !HIST.limpio) { HIST.limpio = true; viejos.forEach(d => db.doc('listas/' + d.id).delete().catch(() => {})); }
+}, () => {}); } catch (e) {} });
+function marcar(envio, si) {
+  avisoMarca('');
+  if (S.demo) { si ? S.demoLlamados.set(envio, { t: Date.now(), dia: '' }) : S.demoLlamados.delete(envio); pintar(); return; }
+  const antes = S.llamados.get(envio), t = Date.now(), hoy = ymd(new Date()), dia = si ? hoy : (antes && antes.dia) || hoy;
+  si ? S.llamados.set(envio, { t, dia }) : S.llamados.delete(envio);
+  pintar();
+  dbP.then(db => {
+    if (!db || !DB.ok) { guardarLocal(); if (!marcar.avisado) { marcar.avisado = true; avisoMarca('Las marcas de «llamado» se están guardando solo en este navegador.'); } return; }
+    DB.pend.set(envio, si ? { t, dia } : null);
+    // una escritura cada vez; el documento del día se crea la primera vez y después se le añaden marcas
+    DB.cola = DB.cola.then(async () => {
+      const ref = db.doc('llamados/' + dia), cuerpo = { e: { [envio]: si ? t : 0 } };
+      try {
+        if (DB.dias.has(dia) || (await ref.get()).exists) await ref.update(cuerpo); else { await ref.set(cuerpo); DB.dias.add(dia); }
+        if (DB.pend.get(envio) && DB.pend.get(envio).t === t || (!si && DB.pend.get(envio) === null)) DB.pend.delete(envio);
+      } catch (e) {
+        DB.pend.delete(envio);
+        antes ? S.llamados.set(envio, antes) : S.llamados.delete(envio); if (!si && !antes) S.llamados.delete(envio);
+        const c = e && e.code; if (c === 'invalid_argument' || c === 'not_granted' || c === 'revoked') DB.soloLectura = true;
+        avisoMarca(DB.soloLectura ? 'No tienes permiso para guardar marcas en esta página: pide al propietario que te dé acceso de colaborador.' : c === 'quota_exceeded' ? 'El almacén de marcas está lleno. Avisa a quien mantiene la página.' : 'No se ha podido guardar la marca. Inténtalo de nuevo en unos segundos.');
+        pintar();
+      }
+    });
+  });
+}
+
+/* ============ datos de ejemplo (inventados) ============ */
+const DEMO = (() => {
+  const D = (dia, h = 0, m = 0) => new Date(2026, dia >= 20 ? 8 : 9, dia, h, m); // 28-30 = septiembre, 1-2 = octubre
+  const ped = (id, cliente, tel, ciudad, cp, sku, nombre, dia) => [id, { id, cliente, tel, tel2: '', fecha: D(dia, 12, 10), dir: 'Calle de Ejemplo 1', ciudad, cp, instr: '', items: [{ sku, nombre, uds: 1 }] }];
+  const pedidos = new Map([
+    ped('000-0000001-0000001', 'Cliente Ejemplo Uno', '600 000 001', 'Zaragoza', '50001', 'L750', 'Batería de coche 75Ah 680A', 29),
+    ped('000-0000002-0000002', 'Cliente Ejemplo Dos', '600 000 002', 'Albox', '04800', 'S800D', 'Batería de coche 80Ah 800A', 30),
+    ped('000-0000003-0000003', 'Cliente Ejemplo Tres', '600 000 003', 'Ourense', '32001', 'C500D', 'Batería de coche 50Ah 400A', 30),
+    ped('000-0000004-0000004', 'Cliente Ejemplo Cuatro', '600 000 004', 'Getafe', '28901', 'TB500', 'Tudor TB500 50Ah', 30),
+    ped('000-0000005-0000005', 'Cliente Ejemplo Cinco', '600 000 005', 'Linares', '23700', 'SG700', 'Batería AGM 70Ah Start-Stop', 30),
+    ped('000-0000006-0000006', 'Cliente Ejemplo Seis', '600 000 006', 'Vigo', '36201', 'C450I', 'Batería de coche 45Ah 360A', 29),
+    ped('000-0000007-0000007', 'Cliente Ejemplo Siete', '', 'Haro', '26200', 'L600D', 'Batería de coche 60Ah 480A', 30),
+    ped('000-0000008-0000008', 'Cliente Ejemplo Ocho', '600 000 008', 'Águilas', '30880', 'L600D', 'Batería de coche 60Ah 480A', 28),
+    ped('000-0000009-0000009', 'Cliente Ejemplo Nueve', '600 000 009', 'Oviedo', '33012', 'B750D', 'Batería de coche 75Ah 640A', 1),
+  ]);
+  const env = (n, ref, dia, dest, pob, cp, estado, fe, prod = 'ePaq 24', obs = '') => ({ envio: '00000000000000' + pad(n), ref, fecha: D(dia), prod, dest, dir: 'Calle de Ejemplo 1', pob, cp, bultos: '1', kilos: '15', estado, fest: fe, recep: '', obs });
+  const envs = [
+    env(1, '000-0000001-0000001', 30, 'Cliente Ejemplo Uno', 'Zaragoza', '50001', 'ENTREGADO', D(1, 11, 20)),
+    env(2, '000-0000002-0000002', 1, 'Cliente Ejemplo Dos', 'Albox', '04800', 'EN ALMACEN: Dañado', D(2, 8, 5)),
+    env(3, '000-0000003-0000003', 1, 'Cliente Ejemplo Tres', 'Ourense', '32001', 'MAL TRANSITADO', D(2, 9, 4)),
+    env(4, '000-0000004-0000004', 1, 'Cliente Ejemplo Cuatro', 'Getafe', '28901', 'EN REPARTO', D(2, 8, 12)),
+    env(5, '000-0000005-0000005', 1, 'Cliente Ejemplo Cinco', 'Linares', '23700', 'REPARTO FALLIDO: Dirección Incompleta', D(2, 9, 46)),
+    env(6, '000-0000006-0000006', 30, 'Cliente Ejemplo Seis', 'Vigo', '36201', 'DELEGACION DESTINO', D(2, 7, 30)),
+    env(7, '000-0000007-0000007', 1, 'Cliente Ejemplo Siete', 'Haro', '26200', 'EN ARRASTRE', D(1, 21, 37)),
+    env(8, '000-0000008-0000008', 1, 'BATERIAS VOLTA SL', 'Alcalá de Henares', '28806', 'EN REPARTO', D(2, 8, 16), 'DEVOLUCION', 'DEVOLUCION DEL ENVIO: 0000000000000099'),
+    env(9, 'WEB VOLTA C750D', 1, 'Cliente Web Ejemplo', 'Burgos', '09001', 'EN REPARTO', D(2, 8, 40)),
+    env(10, 'TEMU P1300D', 1, 'Cliente Temu Ejemplo', 'Lleida', '25001', 'ENTREGADO', D(2, 9, 55)),
+    env(11, '000-0000009-0000009', 2, 'Cliente Ejemplo Nueve', 'Oviedo', '33012', 'ENVIO GRABADO', D(2, 10, 15)),
+  ];
+  return { amazon: [{ nombre: 'ejemplo-amazon.txt', pedidos }], correos: [{ nombre: 'ejemplo-correos.xls', impreso: D(2, 10, 41), envs }] };
+})();
+
+/* ============ eventos ============ */
+async function cargar(files) {
+  S.errores = [];
+  for (const f of files) {
+    try {
+      const r = await leerFichero(f);
+      if (S.demo) S.demo = false;
+      const arr = S[r.tipo], i = arr.findIndex(x => x.nombre === r.dato.nombre);
+      if (i >= 0) arr.splice(i, 1);
+      arr.push(r.dato); // el que se carga el último queda al final y es el que manda
+    } catch (e) { S.errores.push(f.name + ': ' + (e && e.message && !/^no-|^sheetjs$/.test(e.message) ? e.message : 'no he podido leer este fichero. Comprueba que es el .txt de Amazon o el .xls de Correos Express.')); }
+  }
+  pintar();
+}
+['zoneA', 'zoneC'].forEach(id => {
+  const z = $(id), inp = z.querySelector('input');
+  inp.addEventListener('change', () => { cargar([...inp.files]); inp.value = ''; });
+  z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); });
+  z.addEventListener('dragleave', () => z.classList.remove('over'));
+  z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); if (e.dataTransfer && e.dataTransfer.files.length) cargar([...e.dataTransfer.files]); });
+});
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.dataset.rm) { e.preventDefault(); const [k, i] = t.dataset.rm.split(':'); S[k].splice(+i, 1); S.errores = []; if (!S.amazon.length && !S.correos.length) S.demo = true; pintar(); }
+  else if (t.dataset.tab) { S.tab = t.dataset.tab; pintar(); }
+  else if (t.dataset.part) verParte(t.dataset.part);
+  else if (t.dataset.ctab) { C.tab = t.dataset.ctab; pintarControl(); }
+  else if (t.dataset.rmp) { e.preventDefault(); C.listas.splice(+t.dataset.rmp, 1); C.errores = []; if (!C.listas.length) C.llamadas = null; pintarControl(); }
+  else if (t.dataset.copy) { const v = t.dataset.copy; const fin = ok => { t.textContent = ok ? 'copiado' : 'selecciona'; setTimeout(() => t.textContent = 'copiar', 1400); }; try { navigator.clipboard.writeText(v.replace(/\s/g, '')).then(() => fin(true), () => fin(false)); } catch (err) { fin(false); } }
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.done) marcar(t.dataset.done, t.checked);
+  else if (['optDays', 'optCut', 'optDev', 'optAmz'].includes(t.id)) pintar();
+});
+$('q').addEventListener('input', e => { S.q = e.target.value; pintarTabla(); });
+$('btnPdf').addEventListener('click', generarPdf);
+$('btnCPdf').addEventListener('click', generarPdfControl);
+$('btnRg').addEventListener('click', () => comprobarRingover(true));
+$('btnRgUlt').addEventListener('click', () => comprobarRingover(false));
+$('btnListaActual').addEventListener('click', usarListaActual);
+$('cQ').addEventListener('input', e => { C.q = e.target.value; pintarTablaControl(); });
+(() => { const z = $('zoneP'), inp = $('fileP');
+  inp.addEventListener('change', () => { cargarPdfs([...inp.files]); inp.value = ''; });
+  z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); });
+  z.addEventListener('dragleave', () => z.classList.remove('over'));
+  z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('over'); if (e.dataTransfer && e.dataTransfer.files.length) cargarPdfs([...e.dataTransfer.files]); });
+})();
+$('btnCex').addEventListener('click', () => consultar(true));
+$('btnCexUlt').addEventListener('click', () => consultar(false));
+window.__ce = { S, C, DB, HIST, histRehacer, registrarLista, marcar, cargarPdfs, calcularControl, construirPdfControl, llamadasDeMake, listaDelPdf, comprobarRingover, verParte, get K() { return K; }, cargar, calcular, construirPdf, deMake, amazonDeMake, consultar, esperarFin, get M() { return M; } };
+pintar();
+</script>
+
+</body>
+</html>
