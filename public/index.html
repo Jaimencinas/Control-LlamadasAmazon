@@ -502,7 +502,7 @@ function leerAmazon(text, nombre) {
     let p = pedidos.get(id);
     if (!p) {
       const t1 = telLimpio(v('ship-phone-number')), t2 = telLimpio(v('buyer-phone-number'));
-      p = { id, cliente: v('recipient-name') || v('buyer-name'), tel: t1 || t2, tel2: (t1 && t2 && t1 !== t2) ? t2 : '', fecha: new Date(v('purchase-date')), dir: [v('ship-address-1'), v('ship-address-2')].filter(Boolean).join(', '), ciudad: v('ship-city'), cp: v('ship-postal-code').padStart(5, '0'), instr: v('delivery-instructions').replace(/^"+|"+$/g, '').trim(), items: [], vistos: new Set(), est: v('order-status'), general };
+      p = { id, cliente: v('recipient-name') || v('buyer-name'), tel: t1 || t2, tel2: (t1 && t2 && t1 !== t2) ? t2 : '', fecha: new Date(v('purchase-date')), dir: [v('ship-address-1'), v('ship-address-2')].filter(Boolean).join(', '), ciudad: v('ship-city'), cp: v('ship-postal-code').padStart(5, '0'), instr: v('delivery-instructions').replace(/^"+|"+$/g, '').trim(), items: [], vistos: new Set(), est: v('order-status'), general, entrega: fechaEntrega(v('delivery-end-date')), entregaDesde: fechaEntrega(v('delivery-start-date')) };
       if (isNaN(p.fecha)) p.fecha = null;
       pedidos.set(id, p);
     }
@@ -513,6 +513,8 @@ function leerAmazon(text, nombre) {
   let desde = null, hasta = null; pedidos.forEach(p => { if (p.fecha) { if (!desde || p.fecha < desde) desde = p.fecha; if (!hasta || p.fecha > hasta) hasta = p.fecha; } });
   return { nombre, pedidos, desde, hasta, general };
 }
+// Fecha tope de entrega: Amazon la da en UTC (p. ej. 2026-10-19T21:59:59Z = fin del día 19 en España); se queda con el día local.
+function fechaEntrega(s) { s = String(s ?? '').trim(); if (!s) return null; const d = new Date(s); if (isNaN(d)) return null; return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function textoDe(u8) { try { return new TextDecoder('utf-8', { fatal: true }).decode(u8); } catch (e) { return new TextDecoder('windows-1252').decode(u8); } }
 async function leerFichero(file) {
   const u8 = new Uint8Array(await file.arrayBuffer());
@@ -551,7 +553,7 @@ function calcular() {
     const q = pedidos.get(id); if (!q) { pedidos.set(id, p); return; }
     const r = Object.assign({}, q); let c = false;
     if (!r.tel && p.tel) { r.tel = p.tel; r.tel2 = p.tel2; c = true; }
-    ['cliente', 'dir', 'instr', 'ciudad', 'est'].forEach(k => { if (!r[k] && p[k]) { r[k] = p[k]; c = true; } });
+    ['cliente', 'dir', 'instr', 'ciudad', 'est', 'entrega', 'entregaDesde'].forEach(k => { if (!r[k] && p[k]) { r[k] = p[k]; c = true; } });
     if (q.general && !p.general) { r.general = false; c = true; }
     if (c) pedidos.set(id, r);
   }));
@@ -585,10 +587,11 @@ function calcular() {
     const x = { envio: e.envio, ref: e.ref, canal: canalDe(e.ref), fecha: e.fecha, estado: e.estado, fest: e.fest, sit, per, dev,
       cliente: (dev ? (p && p.cliente) || c.nombre : c.nombre || (p && p.cliente)) || '', tel: (p && p.tel) || c.tel || '', tel2: p && p.tel ? (p.tel2 || (c.tel && c.tel !== p.tel ? c.tel : '')) : '', enAmazon: !!p, directo: !!e.directo, hist: e.hist || [],
       pob: (dev ? (p && p.ciudad) || c.pob : c.pob || (p && p.ciudad)) || '', cp: (dev ? (p && p.cp) || c.cp : c.cp || (p && p.cp)) || '', dir: (dev ? (p && p.dir) || c.dir : c.dir || (p && p.dir)) || '',
-      sku: p ? p.items.map(i => (i.uds > 1 ? i.uds + ' × ' : '') + i.sku).join(' + ') : '', prod: p ? p.items.map(i => i.nombre).join(' + ') : '', instr: p ? p.instr : '', obs: e.obs, recep: e.recep, serv: e.prod };
+      entrega: p ? p.entrega : null, entregaDesde: p ? p.entregaDesde : null, sku: p ? p.items.map(i => (i.uds > 1 ? i.uds + ' × ' : '') + i.sku).join(' + ') : '', prod: p ? p.items.map(i => i.nombre).join(' + ') : '', instr: p ? p.instr : '', obs: e.obs, recep: e.recep, serv: e.prod };
     x.enUltimo = e._ult; x.listado = e._t;
     const antes = (HIST.porEnvio.get(e.envio) || []).filter(h => h.dia < ymd(hoy));
     if (antes.length && !S.demo) { const u = antes[antes.length - 1]; x.rep = { veces: antes.length, dia: u.dia, primero: antes[0].dia, mismo: u.es === e.estado }; }
+    x.plazoPasado = !!(x.entrega && x.entrega < hoy && sit !== 'ent');
     x.diasSin = e.fest ? Math.round((hoy - new Date(e.fest.getFullYear(), e.fest.getMonth(), e.fest.getDate())) / 86400000) : null;
     x.llamar = per === 'ventana' && (sit === 'no' || (sit === 'dev' && conDev));
     M.envios.push(x);
@@ -607,7 +610,7 @@ function calcular() {
     o.devol = { envio: x.envio, estado: x.estado, fest: x.fest }; x.llamar = false; x.dupDe = o.envio; M.dupDev++; return false;
   });
   const ord = { no: 0, dev: 1 };
-  M.llamar.sort((a, b) => (a.fecha - b.fecha) || (ord[a.sit] - ord[b.sit]) || a.estado.localeCompare(b.estado) || a.cliente.localeCompare(b.cliente));
+  M.llamar.sort((a, b) => (a.fecha - b.fecha) || ((b.plazoPasado ? 1 : 0) - (a.plazoPasado ? 1 : 0)) || (ord[a.sit] - ord[b.sit]) || a.estado.localeCompare(b.estado) || a.cliente.localeCompare(b.cliente));
   M.envios.sort((a, b) => (b.llamar - a.llamar) || (a.fecha - b.fecha) || a.estado.localeCompare(b.estado));
   const sinTodos = [...pedidos.values()].filter(p => !refs.has(p.id) && !/^cancel/i.test(p.est || '')).sort((a, b) => (a.fecha || 0) - (b.fecha || 0));
   const minEnv = M.envios.reduce((m, x) => x.fecha && (!m || x.fecha < m) ? x.fecha : m, null), lim = minEnv ? new Date(minEnv.getTime() - 86400000) : null;
@@ -618,6 +621,7 @@ function calcular() {
   M.hechos.sort((a, b) => b.llamado - a.llamado);
   M.sinTel = M.llamar.filter(x => !x.tel).length;
   M.nRep = M.llamar.filter(x => x.rep).length;
+  M.nPlazo = M.llamar.filter(x => x.plazoPasado).length; M.conEntrega = M.envios.filter(x => x.entrega).length;
   return M;
 }
 const SIT = { no: ['c', '!', 'No llega hoy'], dev: ['w', '↩', 'Devolución'], ent: ['g', '✓', 'Entregado'], rep: ['a', '→', 'En reparto'] };
@@ -667,7 +671,7 @@ function pintar() {
     <div class="bar" role="img" aria-label="Entregados ${n.ent}, en reparto ${n.rep}, no llegan o devueltos ${n.no + n.dev}, de ${n.rev} envíos">
       <i class="g" style="flex:${n.ent}" title="Entregados: ${n.ent} (${Math.round(n.ent / tot * 100)} %)"${n.ent ? '' : ' hidden'}></i><i class="a" style="flex:${n.rep}" title="En reparto: ${n.rep} (${Math.round(n.rep / tot * 100)} %)"${n.rep ? '' : ' hidden'}></i><i class="c" style="flex:${n.no + n.dev}" title="No llegan hoy o devueltos: ${n.no + n.dev} (${Math.round((n.no + n.dev) / tot * 100)} %)"${n.no + n.dev ? '' : ' hidden'}></i>
     </div>
-    <p class="cap">Listado de Correos Express del ${dmy(M.informe)} a las ${hm(M.informe)}. Se revisan los envíos del ${rangoV(M)}${n.hoy ? `; ${n.hoy === 1 ? '1 envío que sale hoy no cuenta' : n.hoy + ' envíos que salen hoy no cuentan'} todavía` : ''}.${n.otros ? ` No se incluyen ${n.otros} envíos de otros canales (web, Temu, ManoMano, Autodoc).` : ''}${M.dupDev ? ` ${M.dupDev === 1 ? '1 devolución no se repite' : M.dupDev + ' devoluciones no se repiten'} en la lista porque su envío original ya está en ella.` : ''}${M.nRep ? ` ${M.nRep === 1 ? '1 cliente ya salió' : M.nRep + ' clientes ya salieron'} en una lista anterior y ${M.nRep === 1 ? 'va marcado' : 'van marcados'} como «Repetido».` : ''}${M.sinTel ? ` ${M.sinTel === 1 ? '1 de los clientes a llamar no tiene' : M.sinTel + ' de los clientes a llamar no tienen'} teléfono.` : ''}</p>`
+    <p class="cap">Listado de Correos Express del ${dmy(M.informe)} a las ${hm(M.informe)}. Se revisan los envíos del ${rangoV(M)}${n.hoy ? `; ${n.hoy === 1 ? '1 envío que sale hoy no cuenta' : n.hoy + ' envíos que salen hoy no cuentan'} todavía` : ''}.${n.otros ? ` No se incluyen ${n.otros} envíos de otros canales (web, Temu, ManoMano, Autodoc).` : ''}${M.dupDev ? ` ${M.dupDev === 1 ? '1 devolución no se repite' : M.dupDev + ' devoluciones no se repiten'} en la lista porque su envío original ya está en ella.` : ''}${M.nRep ? ` ${M.nRep === 1 ? '1 cliente ya salió' : M.nRep + ' clientes ya salieron'} en una lista anterior y ${M.nRep === 1 ? 'va marcado' : 'van marcados'} como «Repetido».` : ''}${M.nPlazo ? ` ${M.nPlazo === 1 ? '1 cliente ya tiene pasada' : M.nPlazo + ' clientes ya tienen pasada'} la fecha de entrega prometida por Amazon.` : ''}${M.sinTel ? ` ${M.sinTel === 1 ? '1 de los clientes a llamar no tiene' : M.sinTel + ' de los clientes a llamar no tienen'} teléfono.` : ''}</p>`
     : `<p class="cap">Consulta en directo o carga el listado de Correos Express para ver el resultado.</p>`;
   // pestañas
   const T = [['llamar', 'A llamar', M.llamar.length], ['hechos', 'Ya llamados', M.hechos.length], ['todos', 'Todos los envíos', M.envios.length], ['sin', 'Amazon sin envío', M.sin.length]];
@@ -684,8 +688,8 @@ function pintarTabla() {
   const q = norm(S.q), ok = x => !q || norm(Object.values(x).filter(v => typeof v === 'string').join(' ')).includes(q);
   let h = '';
   if (S.tab === 'sin') {
-    const rows = M.sin.map(p => ({ id: p.id, est: /^pending/i.test(p.est || '') ? 'Pendiente en Amazon' : '', gen: !!p.general, cliente: p.cliente, tel: p.tel, tel2: p.tel2, ciudad: p.ciudad, cp: p.cp, sku: p.items.map(i => (i.uds > 1 ? i.uds + ' × ' : '') + i.sku).join(' + '), prod: p.items.map(i => i.nombre).join(' + '), f: p.fecha ? dm(p.fecha) + ' ' + hm(p.fecha) : '' })).filter(ok);
-    h = rows.length ? `<table><thead><tr><th>Pedido</th><th>Fecha pedido</th><th>Cliente</th><th>Teléfono</th><th>Destino</th><th>Producto</th></tr></thead><tbody>` + rows.map(x => `<tr><td><span class="mono nw">${esc(x.id)}</span>${x.est ? `<span class="sub">${x.est}</span>` : ''}</td><td class="num">${esc(x.f)}</td><td>${x.cliente ? esc(x.cliente) : x.gen ? '<span class="muted">sin envío no hay datos del cliente</span>' : ''}</td><td>${x.gen && !x.tel ? '<span class="muted">—</span>' : telHtml(x)}</td><td>${esc(x.ciudad)}<span class="sub">${esc(x.cp)}</span></td><td><span class="mono">${esc(x.sku)}</span><span class="sub">${esc(x.prod.slice(0, 90))}</span></td></tr>`).join('') + '</tbody></table>'
+    const rows = M.sin.map(p => ({ id: p.id, ent: p.entrega ? 'Entrega hasta el ' + dm(p.entrega) : '', est: /^pending/i.test(p.est || '') ? 'Pendiente en Amazon' : '', gen: !!p.general, cliente: p.cliente, tel: p.tel, tel2: p.tel2, ciudad: p.ciudad, cp: p.cp, sku: p.items.map(i => (i.uds > 1 ? i.uds + ' × ' : '') + i.sku).join(' + '), prod: p.items.map(i => i.nombre).join(' + '), f: p.fecha ? dm(p.fecha) + ' ' + hm(p.fecha) : '' })).filter(ok);
+    h = rows.length ? `<table><thead><tr><th>Pedido</th><th>Fecha pedido</th><th>Cliente</th><th>Teléfono</th><th>Destino</th><th>Producto</th></tr></thead><tbody>` + rows.map(x => `<tr><td><span class="mono nw">${esc(x.id)}</span>${x.est ? `<span class="sub">${x.est}</span>` : ''}${x.ent ? `<span class="sub">${x.ent}</span>` : ''}</td><td class="num">${esc(x.f)}</td><td>${x.cliente ? esc(x.cliente) : x.gen ? '<span class="muted">sin envío no hay datos del cliente</span>' : ''}</td><td>${x.gen && !x.tel ? '<span class="muted">—</span>' : telHtml(x)}</td><td>${esc(x.ciudad)}<span class="sub">${esc(x.cp)}</span></td><td><span class="mono">${esc(x.sku)}</span><span class="sub">${esc(x.prod.slice(0, 90))}</span></td></tr>`).join('') + '</tbody></table>'
       : `<div class="empty">${M.sin.length ? 'Ningún pedido coincide con la búsqueda.' : 'Todos los pedidos de Amazon cargados tienen envío en el listado.'}</div>`;
     if (rows.length) h = `<p class="msg" style="padding:10px 12px;border-bottom:1px solid var(--line)">Pedidos de Amazon que no aparecen en los envíos de Correos Express cargados. Puede ser que aún no hayan salido, que vayan por otro transportista o que su día de envío no esté en la consulta. No se incluyen los cancelados.${M.sinAntiguos ? ' No se muestran ' + M.sinAntiguos + ' pedidos anteriores a los envíos del listado.' : ''}</p>` + h;
   } else {
@@ -696,7 +700,7 @@ function pintarTabla() {
         <td><span class="pill ${c}"><b aria-hidden="true">${ic}</b>${t}</span>${x.rep && x.llamar ? `<span class="pill w" style="margin-top:4px"><b aria-hidden="true">↻</b>Repetido · ya salió el ${diaTxt(x.rep.dia)}</span><span class="sub">${x.rep.veces > 1 ? 'Lleva ' + (x.rep.veces + 1) + ' días en la lista, desde el ' + diaTxt(x.rep.primero) + '. ' : ''}${x.rep.mismo ? 'Mismo estado que entonces.' : 'El estado ha cambiado desde entonces.'}</span>` : ''}<span class="sub">${esc(x.estado)}${x.fest ? ' · ' + dm(x.fest) + ' ' + hm(x.fest) : ''}</span>${x.diasSin >= 1 && x.sit !== 'ent' ? `<span class="sub"><b>Sin cambios desde hace ${x.diasSin === 1 ? '1 día' : x.diasSin + ' días'}</b></span>` : ''}${x.devol ? `<span class="sub">Devolución ${esc(x.devol.envio)}: ${esc(x.devol.estado)}${x.devol.fest ? ' · ' + dm(x.devol.fest) + ' ' + hm(x.devol.fest) : ''}</span>` : ''}${x.dupDe ? `<span class="sub">No se repite en «A llamar»: ya está su envío original ${esc(x.dupDe)}</span>` : ''}${!x.enUltimo ? `<span class="sub">Estado del listado del ${dm(x.listado)} ${hm(x.listado)}: no aparece en el último</span>` : ''}${x.hist.length > 1 ? `<details class="hist"><summary>Historial (${x.hist.length} pasos)</summary><ol>${x.hist.map(h => `<li>${h.f ? dm(h.f) + ' ' + hm(h.f) + ' · ' : ''}${esc(h.t)}${h.del ? ' <span class="muted">(' + esc(h.del) + ')</span>' : ''}</li>`).join('')}</ol></details>` : ''}</td>
         <td>${x.cliente ? esc(x.cliente) : '<span class="muted">cliente no identificado</span>'}${x.instr ? `<span class="sub">Nota del cliente: ${esc(x.instr)}</span>` : ''}</td>
         <td>${telHtml(x)}</td>
-        <td><span class="mono nw">${esc(x.ref)}</span><span class="sub nw">${esc(x.canal)} · envío ${esc(x.envio)}</span></td>
+        <td><span class="mono nw">${esc(x.ref)}</span><span class="sub nw">${esc(x.canal)} · envío ${esc(x.envio)}</span>${x.entrega ? `<span class="sub nw"${x.plazoPasado ? ' style="color:var(--crit);font-weight:600"' : ''}>Entrega prometida: ${x.entregaDesde && dm(x.entregaDesde) !== dm(x.entrega) ? dm(x.entregaDesde) + ' a ' : 'hasta el '}${dm(x.entrega)}${x.plazoPasado ? ' · plazo pasado' : ''}</span>` : ''}</td>
         <td class="num">${dm(x.fecha)}</td>
         <td>${esc(x.pob)}<span class="sub">${esc(x.cp)}${x.dir ? ' · ' + esc(x.dir) : ''}</span></td>
         <td><span class="mono">${esc(x.sku)}</span><span class="sub">${esc(x.prod.slice(0, 80))}</span></td></tr>`;
@@ -784,12 +788,13 @@ async function construirPdf(M) {
   if (M.provisional) par(`RESULTADO PROVISIONAL: el listado se sacó antes de las ${M.corte}. Vuelve a descargarlo después de esa hora.`, 9, B, rojo, 3);
   if (n.otros) par(`Solo pedidos de Amazon: no se incluyen ${n.otros} envíos de otros canales.`, 9, F, gris, 3);
   if (M.hechos.length) par(`No se incluyen ${M.hechos.length === 1 ? '1 cliente ya llamado' : M.hechos.length + ' clientes ya llamados'}.`, 9, F, gris, 3);
+  if (M.nPlazo) par(`${M.nPlazo === 1 ? '1 cliente ya tiene pasada' : M.nPlazo + ' clientes ya tienen pasada'} la fecha de entrega prometida por Amazon (PLAZO PASADO).`, 9, B, rojo, 3);
   if (M.nRep) par(`${M.nRep === 1 ? '1 cliente REPETIDO: ya salió' : M.nRep + ' clientes REPETIDOS: ya salieron'} en una lista anterior. ${M.nRep === 1 ? 'Va señalado' : 'Van señalados'} con una barra roja a la izquierda.`, 9, B, rojo, 3);
   if (M.dupDev) par(`${M.dupDev === 1 ? '1 devolución no se repite' : M.dupDev + ' devoluciones no se repiten'}: su envío original ya está en la lista.`, 9, F, gris, 3);
   if (S.demo) par('DATOS DE EJEMPLO: clientes y teléfonos inventados.', 9, B, rojo, 3);
   c.y -= 4;
-  tabla([{ t: 'SITUACIÓN', k: 'a', w: 95, b: 1, max: 5 }, { t: 'CLIENTE', k: 'b', w: 125, b: 1 }, { t: 'TELÉFONO', k: 'c', w: 66, b: 1 }, { t: 'PEDIDO', k: 'd', w: 118 }, { t: 'DESTINO', k: 'f', w: 92 }, { t: 'HECHO', box: 1, w: 31 }],
-    M.llamar.map(x => ({ marca: !!x.rep, a: [x.sit === 'dev' ? 'Devolución al almacén' : 'No llega hoy'].concat(x.rep ? [{ t: 'REPETIDO: ya salió el ' + diaTxt(x.rep.dia) + (x.rep.veces > 1 ? ' (' + (x.rep.veces + 1) + ' días en la lista)' : ''), b: 1, col: rojo }, x.rep.mismo ? 'Mismo estado que entonces' : 'El estado ha cambiado'] : []).concat([(x.sit === 'dev' ? 'Devolución: ' + x.estado : x.estado) + (x.fest ? ' · ' + dm(x.fest) + ' ' + hm(x.fest) : '')].concat(x.devol ? ['Devolución: ' + x.devol.estado + (x.devol.fest ? ' · ' + dm(x.devol.fest) : '')] : []).concat(x.diasSin >= 1 ? ['Sin cambios desde hace ' + (x.diasSin === 1 ? '1 día' : x.diasSin + ' días')] : []).concat(!x.enUltimo ? ['No aparece en el último listado'] : [])), b: [x.cliente || 'Cliente no identificado'].concat(x.instr ? ['Nota: ' + x.instr] : []), c: x.tel ? [x.tel].concat(x.tel2 ? [x.tel2] : []) : ['sin teléfono', motivoSinTel(x)], d: [x.ref, x.canal + ' · ' + x.envio, 'Enviado ' + dm(x.fecha) + (x.sku ? ' · ' + x.sku : '')], f: [x.pob, x.cp] })),
+  tabla([{ t: 'SITUACIÓN', k: 'a', w: 95, b: 1, max: 5 }, { t: 'CLIENTE', k: 'b', w: 125, b: 1 }, { t: 'TELÉFONO', k: 'c', w: 66, b: 1 }, { t: 'PEDIDO', k: 'd', w: 118, max: 5 }, { t: 'DESTINO', k: 'f', w: 92 }, { t: 'HECHO', box: 1, w: 31 }],
+    M.llamar.map(x => ({ marca: !!x.rep, a: [x.sit === 'dev' ? 'Devolución al almacén' : 'No llega hoy'].concat(x.rep ? [{ t: 'REPETIDO: ya salió el ' + diaTxt(x.rep.dia) + (x.rep.veces > 1 ? ' (' + (x.rep.veces + 1) + ' días en la lista)' : ''), b: 1, col: rojo }, x.rep.mismo ? 'Mismo estado que entonces' : 'El estado ha cambiado'] : []).concat([(x.sit === 'dev' ? 'Devolución: ' + x.estado : x.estado) + (x.fest ? ' · ' + dm(x.fest) + ' ' + hm(x.fest) : '')].concat(x.devol ? ['Devolución: ' + x.devol.estado + (x.devol.fest ? ' · ' + dm(x.devol.fest) : '')] : []).concat(x.diasSin >= 1 ? ['Sin cambios desde hace ' + (x.diasSin === 1 ? '1 día' : x.diasSin + ' días')] : []).concat(!x.enUltimo ? ['No aparece en el último listado'] : [])), b: [x.cliente || 'Cliente no identificado'].concat(x.instr ? ['Nota: ' + x.instr] : []), c: x.tel ? [x.tel].concat(x.tel2 ? [x.tel2] : []) : ['sin teléfono', motivoSinTel(x)], d: [x.ref, x.canal + ' · ' + x.envio, 'Enviado ' + dm(x.fecha) + (x.sku ? ' · ' + x.sku : '')].concat(x.entrega ? [{ t: 'Entrega prometida ' + (x.entregaDesde && dm(x.entregaDesde) !== dm(x.entrega) ? dm(x.entregaDesde) + ' a ' : 'hasta el ') + dm(x.entrega) + (x.plazoPasado ? ' · PLAZO PASADO' : ''), b: x.plazoPasado ? 1 : 0, col: x.plazoPasado ? rojo : gris }] : []), f: [x.pob, x.cp] })),
     M.hechos.length ? 'Ya se ha llamado a todos los clientes de la lista.' : 'No hay nadie a quien llamar: todos los envíos revisados están entregados o en reparto.');
   if ($('optSin').checked && M.sin.length) {
     if (c.y < MY + 110) nueva(); else c.y -= 22;
@@ -861,6 +866,13 @@ function amazonDeMake(records) {
   if (!r || !String(r.data.body || '').trim()) throw new Error('Make no tiene guardado ningún informe de Amazon.');
   let dato; try { dato = leerAmazon(String(r.data.body), MAKE.nombreAmz); } catch (e) { throw new Error('Amazon no ha devuelto un informe de pedidos válido.'); }
   dato.directo = true; dato.impreso = parseFecha(String(r.data.fecha || '').replace(/^(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1'));
+  // Fechas de entrega de la API de pedidos: una línea por pedido  id|entrega desde|entrega hasta|estado|envío hasta
+  let conFecha = 0;
+  records.filter(x => x && x.data && x.data.tipo === 'entregas' && +x.data.status === 200).forEach(x => String(x.data.body || '').split('@@ROW@@').forEach(t => {
+    const f = t.split('|'); if (f.length < 3) return; const p = dato.pedidos.get(f[0].trim()); if (!p) return;
+    const h = fechaEntrega(f[2]); if (h) { p.entrega = h; p.entregaDesde = fechaEntrega(f[1]); conFecha++; }
+  }));
+  dato.conFecha = conFecha;
   return dato;
 }
 const SIN_PERMISO = ['needs_reauth', 'server_not_connected', 'selection_required', 'server_not_found', 'not_in_manifest', 'not_granted', 'consent_required', 'blocked_by_policy', 'approval_required', 'capability_disabled', 'capability_removed'];
@@ -911,7 +923,7 @@ async function consultar(lanzar) {
     say('Leyendo el resultado…');
     const leer = async (almacen, limite, conv) => { try { return { dato: conv(registros(await mcp.callTool(MAKE.server, 'data-store-records_list', { dataStoreId: almacen, limit: limite }, { cache: false }))) }; } catch (e) { return { error: e instanceof Error ? e.message : errorMake(e), code: e && e.code }; } };
     const C = await leer(MAKE.almacen, 100, deMake);
-    const A = SIN_PERMISO.includes(C.code) ? { error: C.error, code: C.code } : await leer(MAKE.almacenAmz, 10, amazonDeMake);
+    const A = SIN_PERMISO.includes(C.code) ? { error: C.error, code: C.code } : await leer(MAKE.almacenAmz, 40, amazonDeMake);
     if (!C.dato && !A.dato) { say(C.error === A.error || !A.error ? C.error : 'Correos Express: ' + C.error + ' Amazon: ' + A.error); return; }
     // Si no consta que la consulta nueva haya terminado bien, se comprueba por la hora que lo guardado es de ahora.
     const viejo = x => lanzar && !(fin && +fin.status === 1) && (!x.impreso || x.impreso < new Date(t0.getTime() - 180000));
@@ -919,7 +931,7 @@ async function consultar(lanzar) {
     const partes = [];
     if (C.dato) { pon(S.correos, C.dato); partes.push(`${C.dato.envs.length} envíos de Correos Express` + (C.dato.impreso ? `, consultados el ${dm(C.dato.impreso)} a las ${hm(C.dato.impreso)}` : '') + ` (con detalle de ${C.dato.detalles} que no están entregados ni en reparto o son devoluciones)`); if (viejo(C.dato)) avisos.push('La consulta nueva a Correos Express no ha terminado: se muestra la última guardada.'); }
     else avisos.push('Correos Express: ' + C.error);
-    if (A.dato) { pon(S.amazon, A.dato); partes.push(`${A.dato.pedidos.size} pedidos de Amazon` + (A.dato.desde ? ` del ${dm(A.dato.desde)} al ${dm(A.dato.hasta)}` : '')); if (viejo(A.dato)) avisos.push('Amazon no ha entregado un informe nuevo en esta consulta: se usan los pedidos guardados' + (A.dato.impreso ? ` el ${dm(A.dato.impreso)} a las ${hm(A.dato.impreso)}` : '') + '.'); }
+    if (A.dato) { pon(S.amazon, A.dato); partes.push(`${A.dato.pedidos.size} pedidos de Amazon` + (A.dato.desde ? ` del ${dm(A.dato.desde)} al ${dm(A.dato.hasta)}` : '') + (A.dato.conFecha ? `, ${A.dato.conFecha} con fecha de entrega prometida` : ', sin fechas de entrega')); if (viejo(A.dato)) avisos.push('Amazon no ha entregado un informe nuevo en esta consulta: se usan los pedidos guardados' + (A.dato.impreso ? ` el ${dm(A.dato.impreso)} a las ${hm(A.dato.impreso)}` : '') + '.'); }
     else avisos.push('Amazon: ' + A.error + ' La lista sale igualmente, sin el producto.');
     S.errores = []; S.demo = false;
     pintar();
@@ -1197,7 +1209,7 @@ function marcar(envio, si) {
 /* ============ datos de ejemplo (inventados) ============ */
 const DEMO = (() => {
   const D = (dia, h = 0, m = 0) => new Date(2026, dia >= 20 ? 8 : 9, dia, h, m); // 28-30 = septiembre, 1-2 = octubre
-  const ped = (id, cliente, tel, ciudad, cp, sku, nombre, dia) => [id, { id, cliente, tel, tel2: '', fecha: D(dia, 12, 10), dir: 'Calle de Ejemplo 1', ciudad, cp, instr: '', items: [{ sku, nombre, uds: 1 }] }];
+  const ped = (id, cliente, tel, ciudad, cp, sku, nombre, dia) => [id, { id, cliente, tel, tel2: '', fecha: D(dia, 12, 10), entregaDesde: D(dia + 2), entrega: D(dia + 4), dir: 'Calle de Ejemplo 1', ciudad, cp, instr: '', items: [{ sku, nombre, uds: 1 }] }];
   const pedidos = new Map([
     ped('000-0000001-0000001', 'Cliente Ejemplo Uno', '600 000 001', 'Zaragoza', '50001', 'L750', 'Batería de coche 75Ah 680A', 29),
     ped('000-0000002-0000002', 'Cliente Ejemplo Dos', '600 000 002', 'Albox', '04800', 'S800D', 'Batería de coche 80Ah 800A', 30),
