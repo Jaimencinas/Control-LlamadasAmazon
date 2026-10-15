@@ -925,30 +925,47 @@ async function consultar(lanzar) {
   try {
     const mcp = await mcpP;
     if (!mcp) { say('Esta vista no puede conectar con Make. Abre la página desde Claude, con el conector de Make activado.'); return; }
-    const t0 = new Date(); let fin = null; const avisos = [];
+    const t0 = new Date(); let fin = null, ex = null; const avisos = [];
     if (lanzar) {
       const dias = +$('optDays').value || 4, hoy = new Date(); hoy.setHours(0, 0, 0, 0);
       const fs = [ymd(hoy)], d = new Date(hoy); let n = 0;
       while (n < dias) { d.setDate(d.getDate() - 1); if (d.getDay() !== 0) { n++; fs.unshift(ymd(d)); } }
-      let ex = null, previa = null;
+      let previa = null;
       try { previa = JSON.parse(localStorage.getItem('ce_ejecucion') || 'null'); } catch (e) {}
       if (previa && previa.ex && Date.now() - previa.t < 15 * 60000) {
         // Hay una consulta lanzada hace poco desde este navegador que no consta como terminada: se sigue esperando esa en vez de encolar otra.
         ex = previa.ex; say('Ya hay una consulta en marcha desde hace ' + Math.round((Date.now() - previa.t) / 60000) + ' min. Se espera a que termine, sin lanzar otra.');
       } else {
+        // Antes de lanzar se mira qué hay guardado: si otra persona acaba de consultar (o hay una en marcha), no se lanza otra;
+        // y las fechas de entrega de Amazon solo se vuelven a pedir si las guardadas tienen más de 12 minutos (Amazon limita esas peticiones).
+        say('Comprobando si hay una consulta reciente…');
+        let api = 'si', reciente = null;
+        try {
+          const fechaDe = r => parseFecha(String((r && r.data && r.data.fecha) || '').replace(/^(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1'));
+          const prev = registros(await mcp.callTool(MAKE.server, 'data-store-records_list', { dataStoreId: MAKE.almacenAmz, limit: 40 }, { cache: false }));
+          const ult = prev.filter(r => r && r.data && r.data.tipo === 'entregas').map(fechaDe).filter(Boolean).sort((a, b) => b - a)[0];
+          if (ult && Date.now() - ult.getTime() < 12 * 60000) api = 'no';
+          const cex = registros(await mcp.callTool(MAKE.server, 'data-store-records_list', { dataStoreId: MAKE.almacen, limit: 100 }, { cache: false }));
+          reciente = cex.filter(r => r && r.data && r.data.tipo === 'lista').map(fechaDe).filter(Boolean).sort((a, b) => b - a)[0];
+        } catch (e) {}
+        if (reciente && Date.now() - reciente.getTime() < 3 * 60000) {
+          avisos.push('Alguien ha lanzado una consulta hace ' + Math.max(1, Math.round((Date.now() - reciente.getTime()) / 60000)) + ' min (puede que siga en marcha): no se lanza otra, se carga esa.');
+          await esperarFin(mcp, null, say, { sinId: 45000 });
+        } else {
         say('Lanzando la consulta en Make…');
         try {
-          let pr = cargaUtil(await mcp.callTool(MAKE.server, 'scenarios_run', { scenarioId: MAKE.escenario, responsive: false, data: { fechas: fs.join(','), hoy: ymd(hoy) } }, { cache: false }));
+          let pr = cargaUtil(await mcp.callTool(MAKE.server, 'scenarios_run', { scenarioId: MAKE.escenario, responsive: false, data: { fechas: fs.join(','), hoy: ymd(hoy), api } }, { cache: false }));
           pr = (pr && pr.result) || pr || {}; ex = pr.executionId || null;
           if (ex) { try { localStorage.setItem('ce_ejecucion', JSON.stringify({ ex, t: Date.now() })); } catch (e) {} }
         } catch (e) {
           // Si ya había una consulta en marcha se espera a que termine; cualquier otro fallo se muestra tal cual.
           if (!(e && e.code === 'tool_error' && /already being executed/i.test(e.message || ''))) throw e;
         }
+        }
       }
-      fin = await esperarFin(mcp, ex, say);
+      if (ex) fin = await esperarFin(mcp, ex, say);
       if (fin) { try { localStorage.removeItem('ce_ejecucion'); } catch (e) {} }
-      else avisos.push('La consulta sigue en marcha en Make (Amazon está tardando en generar el informe). Se muestra lo que hay guardado; dentro de unos minutos pulsa «Cargar la última consulta guardada», sin volver a lanzar otra.');
+      else if (ex) avisos.push('La consulta sigue en marcha en Make (Amazon está tardando en generar el informe). Se muestra lo que hay guardado; dentro de unos minutos pulsa «Cargar la última consulta guardada», sin volver a lanzar otra.');
       if (fin && +fin.status === 3) avisos.push('El escenario de Make ha terminado con un error' + (fin.error && fin.error.message ? ' (' + fin.error.message + ')' : '') + '.');
     }
     say('Leyendo el resultado…');
@@ -957,7 +974,7 @@ async function consultar(lanzar) {
     const A = SIN_PERMISO.includes(C.code) ? { error: C.error, code: C.code } : await leer(MAKE.almacenAmz, 40, amazonDeMake);
     if (!C.dato && !A.dato) { say(C.error === A.error || !A.error ? C.error : 'Correos Express: ' + C.error + ' Amazon: ' + A.error); return; }
     // Si no consta que la consulta nueva haya terminado bien, se comprueba por la hora que lo guardado es de ahora.
-    const viejo = x => lanzar && !(fin && +fin.status === 1) && (!x.impreso || x.impreso < new Date(t0.getTime() - 180000));
+    const viejo = x => lanzar && ex && !(fin && +fin.status === 1) && (!x.impreso || x.impreso < new Date(t0.getTime() - 180000));
     const pon = (arr, dato) => { const i = arr.findIndex(x => x.nombre === dato.nombre); if (i >= 0) arr.splice(i, 1); arr.push(dato); };
     const partes = [];
     if (C.dato) { pon(S.correos, C.dato); partes.push(`${C.dato.envs.length} envíos de Correos Express` + (C.dato.impreso ? `, consultados el ${dm(C.dato.impreso)} a las ${hm(C.dato.impreso)}` : '') + ` (con detalle de ${C.dato.detalles} que no están entregados ni en reparto o son devoluciones)`); if (viejo(C.dato) && fin) avisos.push('La consulta nueva a Correos Express no ha terminado: se muestra la última guardada.'); }
