@@ -876,10 +876,18 @@ const espera = ms => new Promise(r => setTimeout(r, ms));
 function cargaUtil(res) { let p = res && res.payload; if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = null; } } return p; }
 function registros(res) { let r = cargaUtil(res); if (r && !Array.isArray(r)) r = r.records || r.data || r.result || []; return Array.isArray(r) ? r : []; }
 function amazonDeMake(records) {
-  const r = records.find(x => x && x.data && x.data.tipo === 'amazon');
-  if (!r || !String(r.data.body || '').trim()) throw new Error('Make no tiene guardado ningún informe de Amazon.');
-  let dato; try { dato = leerAmazon(String(r.data.body), MAKE.nombreAmz); } catch (e) { throw new Error('Amazon no ha devuelto un informe de pedidos válido.'); }
-  dato.directo = true; dato.impreso = parseFecha(String(r.data.fecha || '').replace(/^(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1'));
+  const r = records.find(x => x && x.data && x.data.tipo === 'amazon'), ents = records.filter(x => x && x.data && x.data.tipo === 'entregas' && +x.data.status === 200);
+  let dato = null;
+  if (r && String(r.data.body || '').trim()) { try { dato = leerAmazon(String(r.data.body), MAKE.nombreAmz); } catch (e) { dato = null; } }
+  if (!dato) {
+    if (!ents.length) throw new Error('Make no tiene guardado ningún informe de Amazon.');
+    // Sin informe: los pedidos salen de la API (sin producto), para no quedarse sin fechas tope.
+    dato = { nombre: MAKE.nombreAmz, pedidos: new Map(), desde: null, hasta: null, general: true, sinInforme: true };
+    ents.forEach(x => String(x.data.body || '').split('@@ROW@@').forEach(t => { const f = t.split('|'); const id = (f[0] || '').trim(); if (!/^\d{3}-\d{7}-\d{7}$/.test(id) || /^cancel/i.test(f[3] || '')) return; dato.pedidos.set(id, { id, cliente: '', tel: '', tel2: '', fecha: null, dir: '', ciudad: '', cp: '', instr: '', items: [], vistos: new Set(), est: (f[3] || '').trim(), general: true }); }));
+    if (!dato.pedidos.size) throw new Error('Amazon no ha devuelto pedidos.');
+  }
+  const fuente = r || ents[0];
+  dato.directo = true; dato.impreso = parseFecha(String(fuente.data.fecha || '').replace(/^(\d{4})-(\d{2})-(\d{2})/, '$3/$2/$1'));
   // Fechas de entrega de la API de pedidos: una línea por pedido  id|entrega desde|entrega hasta|estado|envío hasta
   let conFecha = 0;
   records.filter(x => x && x.data && x.data.tipo === 'entregas' && +x.data.status === 200).forEach(x => String(x.data.body || '').split('@@ROW@@').forEach(t => {
@@ -892,13 +900,13 @@ function amazonDeMake(records) {
 const SIN_PERMISO = ['needs_reauth', 'server_not_connected', 'selection_required', 'server_not_found', 'not_in_manifest', 'not_granted', 'consent_required', 'blocked_by_policy', 'approval_required', 'capability_disabled', 'capability_removed'];
 // Espera a que termine la ejecución del escenario. Devuelve sus datos, o null si no se ha podido confirmar que haya terminado.
 async function esperarFin(mcp, ex, say, o) {
-  o = Object.assign({ escenario: MAKE.escenario, texto: 'Make está consultando Amazon y Correos Express… {s} s. Suele tardar alrededor de un minuto.', primera: 20000, cada: 6000, sinId: 80000 }, o);
+  o = Object.assign({ escenario: MAKE.escenario, texto: 'Make está consultando Amazon y Correos Express… {s} s. Suele tardar uno o dos minutos; si Amazon va lento puede ser más.', primera: 20000, cada: 6000, sinId: 80000, max: 480000 }, o);
   const t0 = Date.now(); let fallos = 0;
   const seg = () => Math.round((Date.now() - t0) / 1000);
   const tic = setInterval(() => say(o.texto.replace('{s}', seg())), 1000);
   try {
     await espera(ex ? o.primera : o.sinId);
-    while (ex && Date.now() - t0 < 240000) {
+    while (ex && Date.now() - t0 < o.max) {
       try {
         let p = cargaUtil(await mcp.callTool(MAKE.server, 'executions_get', { scenarioId: o.escenario, executionId: ex }, { cache: false }));
         p = (p && p.result) || p || {};
@@ -922,16 +930,25 @@ async function consultar(lanzar) {
       const dias = +$('optDays').value || 4, hoy = new Date(); hoy.setHours(0, 0, 0, 0);
       const fs = [ymd(hoy)], d = new Date(hoy); let n = 0;
       while (n < dias) { d.setDate(d.getDate() - 1); if (d.getDay() !== 0) { n++; fs.unshift(ymd(d)); } }
-      say('Lanzando la consulta en Make…');
-      let ex = null;
-      try {
-        let pr = cargaUtil(await mcp.callTool(MAKE.server, 'scenarios_run', { scenarioId: MAKE.escenario, responsive: false, data: { fechas: fs.join(','), hoy: ymd(hoy) } }, { cache: false }));
-        pr = (pr && pr.result) || pr || {}; ex = pr.executionId || null;
-      } catch (e) {
-        // Si ya había una consulta en marcha se espera a que termine; cualquier otro fallo se muestra tal cual.
-        if (!(e && e.code === 'tool_error' && /already being executed/i.test(e.message || ''))) throw e;
+      let ex = null, previa = null;
+      try { previa = JSON.parse(localStorage.getItem('ce_ejecucion') || 'null'); } catch (e) {}
+      if (previa && previa.ex && Date.now() - previa.t < 15 * 60000) {
+        // Hay una consulta lanzada hace poco desde este navegador que no consta como terminada: se sigue esperando esa en vez de encolar otra.
+        ex = previa.ex; say('Ya hay una consulta en marcha desde hace ' + Math.round((Date.now() - previa.t) / 60000) + ' min. Se espera a que termine, sin lanzar otra.');
+      } else {
+        say('Lanzando la consulta en Make…');
+        try {
+          let pr = cargaUtil(await mcp.callTool(MAKE.server, 'scenarios_run', { scenarioId: MAKE.escenario, responsive: false, data: { fechas: fs.join(','), hoy: ymd(hoy) } }, { cache: false }));
+          pr = (pr && pr.result) || pr || {}; ex = pr.executionId || null;
+          if (ex) { try { localStorage.setItem('ce_ejecucion', JSON.stringify({ ex, t: Date.now() })); } catch (e) {} }
+        } catch (e) {
+          // Si ya había una consulta en marcha se espera a que termine; cualquier otro fallo se muestra tal cual.
+          if (!(e && e.code === 'tool_error' && /already being executed/i.test(e.message || ''))) throw e;
+        }
       }
       fin = await esperarFin(mcp, ex, say);
+      if (fin) { try { localStorage.removeItem('ce_ejecucion'); } catch (e) {} }
+      else avisos.push('La consulta sigue en marcha en Make (Amazon está tardando en generar el informe). Se muestra lo que hay guardado; dentro de unos minutos pulsa «Cargar la última consulta guardada», sin volver a lanzar otra.');
       if (fin && +fin.status === 3) avisos.push('El escenario de Make ha terminado con un error' + (fin.error && fin.error.message ? ' (' + fin.error.message + ')' : '') + '.');
     }
     say('Leyendo el resultado…');
@@ -943,9 +960,9 @@ async function consultar(lanzar) {
     const viejo = x => lanzar && !(fin && +fin.status === 1) && (!x.impreso || x.impreso < new Date(t0.getTime() - 180000));
     const pon = (arr, dato) => { const i = arr.findIndex(x => x.nombre === dato.nombre); if (i >= 0) arr.splice(i, 1); arr.push(dato); };
     const partes = [];
-    if (C.dato) { pon(S.correos, C.dato); partes.push(`${C.dato.envs.length} envíos de Correos Express` + (C.dato.impreso ? `, consultados el ${dm(C.dato.impreso)} a las ${hm(C.dato.impreso)}` : '') + ` (con detalle de ${C.dato.detalles} que no están entregados ni en reparto o son devoluciones)`); if (viejo(C.dato)) avisos.push('La consulta nueva a Correos Express no ha terminado: se muestra la última guardada.'); }
+    if (C.dato) { pon(S.correos, C.dato); partes.push(`${C.dato.envs.length} envíos de Correos Express` + (C.dato.impreso ? `, consultados el ${dm(C.dato.impreso)} a las ${hm(C.dato.impreso)}` : '') + ` (con detalle de ${C.dato.detalles} que no están entregados ni en reparto o son devoluciones)`); if (viejo(C.dato) && fin) avisos.push('La consulta nueva a Correos Express no ha terminado: se muestra la última guardada.'); }
     else avisos.push('Correos Express: ' + C.error);
-    if (A.dato) { pon(S.amazon, A.dato); partes.push(`${A.dato.pedidos.size} pedidos de Amazon` + (A.dato.desde ? ` del ${dm(A.dato.desde)} al ${dm(A.dato.hasta)}` : '') + (A.dato.conFecha ? `, ${A.dato.conFecha} con fecha de entrega prometida` : ', sin fechas de entrega')); if (viejo(A.dato)) avisos.push('Amazon no ha entregado un informe nuevo en esta consulta: se usan los pedidos guardados' + (A.dato.impreso ? ` el ${dm(A.dato.impreso)} a las ${hm(A.dato.impreso)}` : '') + '.'); }
+    if (A.dato) { pon(S.amazon, A.dato); partes.push(`${A.dato.pedidos.size} pedidos de Amazon` + (A.dato.desde ? ` del ${dm(A.dato.desde)} al ${dm(A.dato.hasta)}` : '') + (A.dato.conFecha ? `, ${A.dato.conFecha} con fecha tope de entrega` : ', sin fechas de entrega') + (A.dato.sinInforme ? ' (Amazon aún no ha entregado el informe de productos: falta el producto)' : '')); if (viejo(A.dato) && fin) avisos.push('Amazon no ha entregado un informe nuevo en esta consulta: se usan los pedidos guardados' + (A.dato.impreso ? ` el ${dm(A.dato.impreso)} a las ${hm(A.dato.impreso)}` : '') + '.'); }
     else avisos.push('Amazon: ' + A.error + ' La lista sale igualmente, sin el producto.');
     S.errores = []; S.demo = false;
     pintar();
