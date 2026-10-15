@@ -581,7 +581,7 @@ function calcular() {
     if (soloAmz && canalDe(e.ref) !== 'Amazon') { M.n.otros++; return; }
     const up = e.estado.toUpperCase(), dev = /^DEVOLUC/i.test(e.prod), p = pedidos.get(e.ref);
     let sit = dev ? 'dev' : up.startsWith('ENTREGADO') ? 'ent' : up.startsWith('EN REPARTO') ? 'rep' : 'no';
-    const per = !e.fecha ? 'ventana' : e.fecha >= hoy ? 'hoy' : e.fecha < desde ? 'viejo' : 'ventana';
+    let per = !e.fecha ? 'ventana' : e.fecha >= hoy ? 'hoy' : e.fecha < desde ? 'viejo' : 'ventana';
     // Con fecha tope de entrega de Amazon manda esa fecha:
     //  - tope ya pasado y sin entregar → «Plazo pasado», se llama (hasta que se marque como llamado);
     //  - hoy es el día tope → si no está en reparto ni en tránsito, no llega a tiempo, se llama;
@@ -590,7 +590,7 @@ function calcular() {
     let plazo = '';
     if (tope && sit !== 'ent') {
       const transito = sit === 'rep' || /^(EN )?TRANSITO/.test(up);
-      if (hoy > tope) { plazo = 'tarde'; sit = 'tarde'; }
+      if (hoy > tope) { plazo = 'tarde'; sit = 'tarde'; if (per === 'viejo') per = 'ventana'; /* con el plazo pasado sigue en la lista aunque el envío sea anterior al periodo */ }
       else if (hoy.getTime() === tope.getTime()) { plazo = 'hoy'; sit = transito ? 'rep' : 'no'; }
       else { plazo = 'futuro'; sit = 'plazo'; }
     }
