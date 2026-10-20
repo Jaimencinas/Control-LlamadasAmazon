@@ -822,7 +822,7 @@ async function construirPdf(M) {
 }
 
 /* ============ Correos Express en directo (escenario de Make) ============ */
-const MAKE = { server: 'Make', escenarioRg: 9925738, almacenRg: 193318, escenario: 9918565, almacen: 192885, almacenAmz: 192908, nombre: 'Correos Express en directo', nombreAmz: 'Amazon en directo' };
+const MAKE = { server: 'Make', escenarioDet: 10009533, escenarioRg: 9925738, almacenRg: 193318, escenario: 9918565, almacen: 192885, almacenAmz: 192908, nombre: 'Correos Express en directo', nombreAmz: 'Amazon en directo' };
 const EST_CEX = { 1: 'SIN RECEPCION', 2: 'EN ARRASTRE', 4: 'TRANSITO', 6: 'DELEGACION DESTINO', 7: 'TRAMO DESTINO', 8: 'EN REPARTO', 9: 'REPARTO FALLIDO', 10: 'ALMACEN ESTACIONADO', 11: 'NUEVO REPARTO', 12: 'ENTREGADO', 17: 'DEVUELTO', 39: 'DISPONIBLE EN PUNTO DE RECOGIDA' };
 function fechaCex(d, h) { // DDMMAAAA y HHMMSS
   d = String(d ?? ''); h = String(h ?? ''); if (!/^\d{8}$/.test(d)) return null; if (!/^\d{6}$/.test(h)) h = '000000';
@@ -988,6 +988,22 @@ async function consultar(lanzar) {
     S.errores = []; S.demo = false;
     pintar();
     say('Cargados ' + partes.join(' y ') + '.' + (avisos.length ? ' ' + avisos.join(' ') : ''));
+    // Los envíos «en reparto» no traen detalle (nombre y teléfono) en la consulta general; si alguno hay que llamarlo (plazo pasado), se pide ahora.
+    if (C.dato) {
+      const faltan = M.llamar.filter(x => x.directo && !x.tel && !x.dev).map(x => x.envio).slice(0, 60);
+      if (faltan.length) {
+        try {
+          say('Pidiendo a Correos Express el teléfono de ' + faltan.length + (faltan.length === 1 ? ' cliente…' : ' clientes…'));
+          let pr = cargaUtil(await mcp.callTool(MAKE.server, 'scenarios_run', { scenarioId: MAKE.escenarioDet, responsive: false, data: { envios: faltan.join(',') } }, { cache: false }));
+          pr = (pr && pr.result) || pr || {};
+          const f2 = await esperarFin(mcp, pr.executionId || null, say, { escenario: MAKE.escenarioDet, texto: 'Pidiendo a Correos Express los teléfonos que faltan… {s} s.', primera: 4000, cada: 3000, sinId: 15000 });
+          const C2 = await leer(MAKE.almacen, 100, deMake);
+          if (C2.dato) { pon(S.correos, C2.dato); pintar(); }
+          const sinTel = M.llamar.filter(x => x.directo && !x.tel && !x.dev).length;
+          say('Cargados ' + partes.join(' y ') + '.' + (avisos.length ? ' ' + avisos.join(' ') : '') + (sinTel ? ` ${sinTel} de los clientes a llamar siguen sin teléfono` + (f2 ? '.' : ' (Correos Express no ha respondido a tiempo; vuelve a pulsar «Cargar la última consulta guardada»).') : ' Teléfonos completados.'));
+        } catch (e) { say('Cargados ' + partes.join(' y ') + '. No se han podido pedir los teléfonos que faltan: ' + (e instanceof Error ? e.message : errorMake(e))); }
+      }
+    }
   } catch (e) { say(e instanceof Error ? e.message : errorMake(e)); }
   finally { b1.disabled = b2.disabled = false; }
 }
