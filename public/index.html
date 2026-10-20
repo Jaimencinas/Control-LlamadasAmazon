@@ -891,7 +891,11 @@ function amazonDeMake(records) {
   // Fechas de entrega de la API de pedidos: una línea por pedido  id|entrega desde|entrega hasta|estado|envío hasta
   let conFecha = 0;
   records.filter(x => x && x.data && x.data.tipo === 'entregas' && +x.data.status === 200).forEach(x => String(x.data.body || '').split('@@ROW@@').forEach(t => {
-    const f = t.split('|'); if (f.length < 3) return; const p = dato.pedidos.get(f[0].trim()); if (!p) return;
+    const f = t.split('|'); if (f.length < 3) return; const id = f[0].trim(); let p = dato.pedidos.get(id);
+    if (!p) { // pedido más reciente que el informe de productos (o sin informe): se añade sin producto para no perder su fecha tope
+      if (!/^\d{3}-\d{7}-\d{7}$/.test(id) || /^cancel/i.test(f[3] || '')) return;
+      p = { id, cliente: '', tel: '', tel2: '', fecha: null, dir: '', ciudad: '', cp: '', instr: '', items: [], vistos: new Set(), est: (f[3] || '').trim(), general: true, sinInforme: true }; dato.pedidos.set(id, p); dato.sinProducto = (dato.sinProducto || 0) + 1;
+    }
     const h = fechaEntrega(f[2]); if (h) { p.entrega = h; p.entregaDesde = fechaEntrega(f[1]); conFecha++; }
   }));
   dato.conFecha = conFecha;
@@ -979,7 +983,7 @@ async function consultar(lanzar) {
     const partes = [];
     if (C.dato) { pon(S.correos, C.dato); partes.push(`${C.dato.envs.length} envíos de Correos Express` + (C.dato.impreso ? `, consultados el ${dm(C.dato.impreso)} a las ${hm(C.dato.impreso)}` : '') + ` (con detalle de ${C.dato.detalles} que no están entregados ni en reparto o son devoluciones)`); if (viejo(C.dato) && fin) avisos.push('La consulta nueva a Correos Express no ha terminado: se muestra la última guardada.'); }
     else avisos.push('Correos Express: ' + C.error);
-    if (A.dato) { pon(S.amazon, A.dato); partes.push(`${A.dato.pedidos.size} pedidos de Amazon` + (A.dato.desde ? ` del ${dm(A.dato.desde)} al ${dm(A.dato.hasta)}` : '') + (A.dato.conFecha ? `, ${A.dato.conFecha} con fecha tope de entrega` : ', sin fechas de entrega') + (A.dato.sinInforme ? ' (Amazon aún no ha entregado el informe de productos: falta el producto)' : '')); if (viejo(A.dato) && fin) avisos.push('Amazon no ha entregado un informe nuevo en esta consulta: se usan los pedidos guardados' + (A.dato.impreso ? ` el ${dm(A.dato.impreso)} a las ${hm(A.dato.impreso)}` : '') + '.'); }
+    if (A.dato) { pon(S.amazon, A.dato); partes.push(`${A.dato.pedidos.size} pedidos de Amazon` + (A.dato.desde ? ` del ${dm(A.dato.desde)} al ${dm(A.dato.hasta)}` : '') + (A.dato.conFecha ? `, ${A.dato.conFecha} con fecha tope de entrega` : ', sin fechas de entrega') + (A.dato.sinInforme ? ' (Amazon aún no ha entregado el informe de productos: falta el producto)' : A.dato.sinProducto ? ` (${A.dato.sinProducto} más recientes que el informe de productos: sin producto)` : '')); if (viejo(A.dato) && fin) avisos.push('Amazon no ha entregado un informe nuevo en esta consulta: se usan los pedidos guardados' + (A.dato.impreso ? ` el ${dm(A.dato.impreso)} a las ${hm(A.dato.impreso)}` : '') + '.'); }
     else avisos.push('Amazon: ' + A.error + ' La lista sale igualmente, sin el producto.');
     S.errores = []; S.demo = false;
     pintar();
